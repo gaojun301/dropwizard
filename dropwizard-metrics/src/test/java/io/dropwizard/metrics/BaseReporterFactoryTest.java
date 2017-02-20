@@ -27,9 +27,9 @@ public class BaseReporterFactoryTest {
     public static List<Object[]> data() {
 
         return ImmutableList.of(
-                /**
-                 * case1: If include list is empty and exclude list is empty, everything should be
-                 * included.
+                /*
+                  case1: If include list is empty and exclude list is empty, everything should be
+                  included.
                  */
                 new Object[]{EMPTY, EMPTY, "inc", true, true, "case1"},
                 new Object[]{EMPTY, EMPTY, "both", true, true, "case1"},
