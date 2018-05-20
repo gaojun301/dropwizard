@@ -1,9 +1,11 @@
 package io.dropwizard.jetty;
 
+import com.google.common.collect.ImmutableSortedSet;
 import org.eclipse.jetty.http.HttpHeader;
 import org.eclipse.jetty.server.Request;
 import org.eclipse.jetty.server.handler.gzip.GzipHandler;
 
+import javax.annotation.Nullable;
 import javax.servlet.ReadListener;
 import javax.servlet.ServletException;
 import javax.servlet.ServletInputStream;
@@ -28,7 +30,7 @@ import java.util.zip.InflaterInputStream;
  */
 public class BiDiGzipHandler extends GzipHandler {
 
-    private final ThreadLocal<Inflater> localInflater = new ThreadLocal<>();
+    private static final ThreadLocal<Inflater> localInflater = new ThreadLocal<>();
 
     /**
      * Size of the buffer for decompressing requests
@@ -49,21 +51,18 @@ public class BiDiGzipHandler extends GzipHandler {
         this.inflateNoWrap = inflateNoWrap;
     }
 
-    public BiDiGzipHandler() {
-    }
-
     public void setInputBufferSize(int inputBufferSize) {
         this.inputBufferSize = inputBufferSize;
     }
 
     @Override
     public void handle(String target, Request baseRequest, HttpServletRequest request, HttpServletResponse response)
-            throws IOException, ServletException {
+        throws IOException, ServletException {
         final String encoding = request.getHeader(HttpHeader.CONTENT_ENCODING.asString());
         if (GZIP.equalsIgnoreCase(encoding)) {
-            super.handle(target, baseRequest, wrapGzippedRequest(removeContentEncodingHeader(request)), response);
+            super.handle(target, baseRequest, wrapGzippedRequest(removeContentHeaders(request)), response);
         } else if (DEFLATE.equalsIgnoreCase(encoding)) {
-            super.handle(target, baseRequest, wrapDeflatedRequest(removeContentEncodingHeader(request)), response);
+            super.handle(target, baseRequest, wrapDeflatedRequest(removeContentHeaders(request)), response);
         } else {
             super.handle(target, baseRequest, request, response);
         }
@@ -86,22 +85,36 @@ public class BiDiGzipHandler extends GzipHandler {
 
     private WrappedServletRequest wrapDeflatedRequest(HttpServletRequest request) throws IOException {
         final Inflater inflater = buildInflater();
-        final InflaterInputStream input = new InflaterInputStream(request.getInputStream(), inflater, inputBufferSize) {
-            @Override
-            public void close() throws IOException {
-                super.close();
-                localInflater.set(inflater);
-            }
-        };
-        return new WrappedServletRequest(request, input);
+        try {
+            final InflaterInputStream input = new InflaterInputStream(request.getInputStream(), inflater, inputBufferSize) {
+                @Override
+                public void close() throws IOException {
+                    super.close();
+                    localInflater.set(inflater);
+                }
+            };
+            return new WrappedServletRequest(request, new ZipExceptionHandlingInputStream(input, DEFLATE));
+        } catch (IOException e) {
+            throw ZipExceptionHandlingInputStream.handleException(DEFLATE, e);
+        }
     }
 
     private WrappedServletRequest wrapGzippedRequest(HttpServletRequest request) throws IOException {
-        return new WrappedServletRequest(request, new GZIPInputStream(request.getInputStream(), inputBufferSize));
+        try {
+            final GZIPInputStream input = new GZIPInputStream(request.getInputStream(), inputBufferSize);
+            return new WrappedServletRequest(request, new ZipExceptionHandlingInputStream(input, GZIP));
+        } catch (IOException e) {
+            throw ZipExceptionHandlingInputStream.handleException(GZIP, e);
+        }
     }
 
-    private HttpServletRequest removeContentEncodingHeader(final HttpServletRequest request) {
-        return new RemoveHttpHeaderWrapper(request, HttpHeader.CONTENT_ENCODING.asString());
+    private HttpServletRequest removeContentHeaders(final HttpServletRequest request) {
+        // The decoded content is plain and generated dynamically, therefore the "Content-Encoding" and "Content-Length"
+        // headers should be removed after after the processing.
+        return new RemoveHttpHeadersWrapper(request, ImmutableSortedSet.orderedBy(String::compareToIgnoreCase)
+            .add(HttpHeader.CONTENT_ENCODING.asString())
+            .add(HttpHeader.CONTENT_LENGTH.asString())
+            .build());
     }
 
     private static class WrappedServletRequest extends HttpServletRequestWrapper {
@@ -131,6 +144,17 @@ public class BiDiGzipHandler extends GzipHandler {
         @Override
         public BufferedReader getReader() throws IOException {
             return reader;
+        }
+
+        @Override
+        public int getContentLength() {
+            // Because the we replace the original stream, the new content length is not known.
+            return -1;
+        }
+
+        @Override
+        public long getContentLengthLong() {
+            return -1L;
         }
     }
 
@@ -210,12 +234,12 @@ public class BiDiGzipHandler extends GzipHandler {
         }
     }
 
-    private static class RemoveHttpHeaderWrapper extends HttpServletRequestWrapper {
-        private final String headerName;
+    private static class RemoveHttpHeadersWrapper extends HttpServletRequestWrapper {
+        private final ImmutableSortedSet<String> headerNames;
 
-        RemoveHttpHeaderWrapper(final HttpServletRequest request, final String headerName) {
+        RemoveHttpHeadersWrapper(final HttpServletRequest request, final ImmutableSortedSet<String> headerNames) {
             super(request);
-            this.headerName = headerName;
+            this.headerNames = headerNames;
         }
 
         /**
@@ -226,7 +250,7 @@ public class BiDiGzipHandler extends GzipHandler {
          */
         @Override
         public int getIntHeader(final String name) {
-            if (headerName.equalsIgnoreCase(name)) {
+            if (headerNames.contains(name)) {
                 return -1;
             } else {
                 return super.getIntHeader(name);
@@ -241,7 +265,7 @@ public class BiDiGzipHandler extends GzipHandler {
          */
         @Override
         public Enumeration<String> getHeaders(final String name) {
-            if (headerName.equalsIgnoreCase(name)) {
+            if (headerNames.contains(name)) {
                 return Collections.emptyEnumeration();
             } else {
                 return super.getHeaders(name);
@@ -255,8 +279,9 @@ public class BiDiGzipHandler extends GzipHandler {
          * @param name a <code>String</code> specifying the name of a request header
          */
         @Override
+        @Nullable
         public String getHeader(final String name) {
-            if (headerName.equalsIgnoreCase(name)) {
+            if (headerNames.contains(name)) {
                 return null;
             } else {
                 return super.getHeader(name);
@@ -271,7 +296,7 @@ public class BiDiGzipHandler extends GzipHandler {
          */
         @Override
         public long getDateHeader(final String name) {
-            if (headerName.equalsIgnoreCase(name)) {
+            if (headerNames.contains(name)) {
                 return -1L;
             } else {
                 return super.getDateHeader(name);

@@ -25,7 +25,7 @@ Authenticators implement the ``Authenticator<C, P extends Principal>`` interface
             if ("secret".equals(credentials.getPassword())) {
                 return Optional.of(new User(credentials.getUsername()));
             }
-            return Optional.absent();
+            return Optional.empty();
         }
     }
 
@@ -376,6 +376,9 @@ Note that with the above example, only *authentication* is configured. If you al
 * Register the ``RolesAllowedDynamicFeature`` with the application.
 
 * Make sure you add ``Authorizers`` when you build your ``AuthFilters``.
+
+* Make sure any custom ``AuthFilter`` you add has the ``@Priority(Priorities.AUTHENTICATION)`` annotation set
+  (otherwise authorization will be tested before the request's security context is properly set and will fail).
 
 * Annotate the resource *method* with the authorization annotation. Unlike the note earlier in
   this document that says authorization annotations are allowed on classes, with this

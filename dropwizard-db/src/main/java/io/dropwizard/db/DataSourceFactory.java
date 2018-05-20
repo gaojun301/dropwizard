@@ -8,7 +8,9 @@ import io.dropwizard.util.Duration;
 import io.dropwizard.validation.MinDuration;
 import io.dropwizard.validation.ValidationMethod;
 import org.apache.tomcat.jdbc.pool.PoolProperties;
+import org.hibernate.validator.constraints.NotEmpty;
 
+import javax.annotation.Nullable;
 import javax.validation.constraints.Max;
 import javax.validation.constraints.Min;
 import javax.validation.constraints.NotNull;
@@ -241,7 +243,7 @@ import java.util.concurrent.TimeUnit;
  *     </tr>
  *     <tr>
  *         <td>{@code checkConnectionOnConnect}</td>
- *         <td>{@code false}</td>
+ *         <td>{@code true}</td>
  *         <td>
  *             Whether or not connections will be validated before being added to the pool. If the
  *             connection fails to validate, it won't be added to the pool.
@@ -285,6 +287,23 @@ import java.util.concurrent.TimeUnit;
  *             implementation, which will be used for validating connections.
  *         </td>
  *     </tr>
+ *     <tr>
+ *         <td>{@code jdbcInterceptors}</td>
+ *         <td>(none)</td>
+ *         <td>
+ *             A semicolon separated list of classnames extending
+ *             {@link org.apache.tomcat.jdbc.pool.JdbcInterceptor}
+ *         </td>
+ *     </tr>
+ *     <tr>
+ *         <td>{@code ignoreExceptionOnPreLoad}</td>
+ *         <td>{@code false}</td>
+ *         <td>
+ *             Flag whether ignore error of connection creation while initializing the pool. Set to
+ *             true if you want to ignore error of connection creation while initializing the pool.
+ *             Set to false if you want to fail the initialization of the pool by throwing exception.
+ *         </td>
+ *     </tr>
  * </table>
  */
 public class DataSourceFactory implements PooledDataSourceFactory {
@@ -308,8 +327,8 @@ public class DataSourceFactory implements PooledDataSourceFactory {
         }
     }
 
-    @NotNull
-    private String driverClass = null;
+    @NotEmpty
+    private String driverClass = "";
 
     @Min(0)
     @Max(100)
@@ -321,20 +340,25 @@ public class DataSourceFactory implements PooledDataSourceFactory {
 
     private boolean rollbackOnReturn = false;
 
+    @Nullable
     private Boolean autoCommitByDefault;
 
+    @Nullable
     private Boolean readOnlyByDefault;
 
-    private String user = null;
+    @Nullable
+    private String user;
 
-    private String password = null;
+    @Nullable
+    private String password;
 
-    @NotNull
-    private String url = null;
+    @NotEmpty
+    private String url = "";
 
     @NotNull
     private Map<String, String> properties = new LinkedHashMap<>();
 
+    @Nullable
     private String defaultCatalog;
 
     @NotNull
@@ -351,27 +375,30 @@ public class DataSourceFactory implements PooledDataSourceFactory {
     @Min(1)
     private int maxSize = 100;
 
+    @Nullable
     private String initializationQuery;
 
     private boolean logAbandonedConnections = false;
 
     private boolean logValidationErrors = false;
 
-    @MinDuration(value = 1, unit = TimeUnit.SECONDS)
+    @MinDuration(value = 0, unit = TimeUnit.MILLISECONDS, inclusive = false)
+    @Nullable
     private Duration maxConnectionAge;
 
     @NotNull
-    @MinDuration(value = 1, unit = TimeUnit.SECONDS)
+    @MinDuration(value = 0, unit = TimeUnit.MILLISECONDS, inclusive = false)
     private Duration maxWaitForConnection = Duration.seconds(30);
 
     @NotNull
-    @MinDuration(value = 1, unit = TimeUnit.SECONDS)
+    @MinDuration(value = 0, unit = TimeUnit.MILLISECONDS, inclusive = false)
     private Duration minIdleTime = Duration.minutes(1);
 
     @NotNull
     private String validationQuery = "/* Health Check */ SELECT 1";
 
-    @MinDuration(value = 1, unit = TimeUnit.SECONDS)
+    @MinDuration(value = 0, unit = TimeUnit.MILLISECONDS, inclusive = false)
+    @Nullable
     private Duration validationQueryTimeout;
 
     private boolean checkConnectionWhileIdle = true;
@@ -385,11 +412,11 @@ public class DataSourceFactory implements PooledDataSourceFactory {
     private boolean autoCommentsEnabled = true;
 
     @NotNull
-    @MinDuration(1)
+    @MinDuration(value = 0, unit = TimeUnit.MILLISECONDS, inclusive = false)
     private Duration evictionInterval = Duration.seconds(5);
 
     @NotNull
-    @MinDuration(1)
+    @MinDuration(value = 50, unit = TimeUnit.MILLISECONDS)
     private Duration validationInterval = Duration.seconds(30);
 
     private Optional<String> validatorClassName = Optional.empty();
@@ -397,8 +424,12 @@ public class DataSourceFactory implements PooledDataSourceFactory {
     private boolean removeAbandoned = false;
 
     @NotNull
-    @MinDuration(1)
+    @MinDuration(value = 0, unit = TimeUnit.MILLISECONDS, inclusive = false)
     private Duration removeAbandonedTimeout = Duration.seconds(60L);
+
+    private Optional<String> jdbcInterceptors = Optional.empty();
+
+    private boolean ignoreExceptionOnPreLoad = false;
 
     @JsonProperty
     @Override
@@ -423,6 +454,7 @@ public class DataSourceFactory implements PooledDataSourceFactory {
     }
 
     @JsonProperty
+    @Nullable
     public String getUser() {
         return user;
     }
@@ -433,6 +465,7 @@ public class DataSourceFactory implements PooledDataSourceFactory {
     }
 
     @JsonProperty
+    @Nullable
     public String getPassword() {
         return password;
     }
@@ -593,6 +626,7 @@ public class DataSourceFactory implements PooledDataSourceFactory {
     }
 
     @JsonProperty
+    @Nullable
     public Boolean getAutoCommitByDefault() {
         return autoCommitByDefault;
     }
@@ -603,6 +637,7 @@ public class DataSourceFactory implements PooledDataSourceFactory {
     }
 
     @JsonProperty
+    @Nullable
     public String getDefaultCatalog() {
         return defaultCatalog;
     }
@@ -613,6 +648,7 @@ public class DataSourceFactory implements PooledDataSourceFactory {
     }
 
     @JsonProperty
+    @Nullable
     public Boolean getReadOnlyByDefault() {
         return readOnlyByDefault;
     }
@@ -653,6 +689,7 @@ public class DataSourceFactory implements PooledDataSourceFactory {
     }
 
     @JsonProperty
+    @Nullable
     public String getInitializationQuery() {
         return initializationQuery;
     }
@@ -800,6 +837,26 @@ public class DataSourceFactory implements PooledDataSourceFactory {
         this.removeAbandonedTimeout = Objects.requireNonNull(removeAbandonedTimeout);
     }
 
+    @JsonProperty
+    public Optional<String> getJdbcInterceptors() {
+        return jdbcInterceptors;
+    }
+
+    @JsonProperty
+    public void setJdbcInterceptors(Optional<String> jdbcInterceptors) {
+        this.jdbcInterceptors = jdbcInterceptors;
+    }
+
+    @JsonProperty
+    public boolean isIgnoreExceptionOnPreLoad() {
+        return ignoreExceptionOnPreLoad;
+    }
+
+    @JsonProperty
+    public void setIgnoreExceptionOnPreLoad(boolean ignoreExceptionOnPreLoad) {
+        this.ignoreExceptionOnPreLoad = ignoreExceptionOnPreLoad;
+    }
+
     @Override
     public void asSingleConnectionPool() {
         minSize = 1;
@@ -826,6 +883,7 @@ public class DataSourceFactory implements PooledDataSourceFactory {
         poolConfig.setDefaultTransactionIsolation(defaultTransactionIsolation.get());
         poolConfig.setDriverClassName(driverClass);
         poolConfig.setFairQueue(useFairQueue);
+        poolConfig.setIgnoreExceptionOnPreLoad(ignoreExceptionOnPreLoad);
         poolConfig.setInitialSize(initialSize);
         poolConfig.setInitSQL(initializationQuery);
         poolConfig.setLogAbandoned(logAbandonedConnections);
@@ -835,7 +893,7 @@ public class DataSourceFactory implements PooledDataSourceFactory {
         poolConfig.setMinIdle(minSize);
 
         if (getMaxConnectionAge().isPresent()) {
-            poolConfig.setMaxAge(maxConnectionAge.toMilliseconds());
+            poolConfig.setMaxAge(getMaxConnectionAge().get().toMilliseconds());
         }
 
         poolConfig.setMaxWait((int) maxWaitForConnection.toMilliseconds());
@@ -856,10 +914,10 @@ public class DataSourceFactory implements PooledDataSourceFactory {
         poolConfig.setValidationInterval(validationInterval.toMilliseconds());
 
         if (getValidationQueryTimeout().isPresent()) {
-            poolConfig.setValidationQueryTimeout((int) validationQueryTimeout.toSeconds());
+            poolConfig.setValidationQueryTimeout((int) getValidationQueryTimeout().get().toSeconds());
         }
         validatorClassName.ifPresent(poolConfig::setValidatorClassName);
-
+        jdbcInterceptors.ifPresent(poolConfig::setJdbcInterceptors);
         return new ManagedPooledDataSource(poolConfig, metricRegistry);
     }
 }

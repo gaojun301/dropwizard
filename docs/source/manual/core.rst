@@ -26,27 +26,43 @@ Dropwizard consists mostly of glue code to automatically connect and configure t
 Organizing Your Project
 =======================
 
-In general, we recommend you separate your projects into three Maven modules: ``project-api``,
-``project-client``, and ``project-application``.
+If you plan on developing a client library for other developers to access your service, we recommend
+you separate your projects into three Maven modules: ``project-api``, ``project-client``, and
+``project-application``.
 
 ``project-api`` should contain your :ref:`man-core-representations`; ``project-client`` should use
 those classes and an :ref:`HTTP client <man-client>` to implement a full-fledged client for your
 application, and ``project-application`` should provide the actual application implementation, including
 :ref:`man-core-resources`.
 
-Our applications tend to look like this:
+To give a concrete example of this project structure, let's say we wanted to create a Stripe_-like
+API where clients can issue charges and the server would echo the charge back to the client.
+``stripe-api`` project would hold our ``Charge`` object as both the server and client want to work
+with the charge and to promote code reuse, ``Charge`` objects are stored in a shared module.
+``stripe-app`` is the Dropwizard application. ``stripe-client`` abstracts away the raw HTTP
+interactions and deserialization logic. Instead of using a HTTP client, users of ``stripe-client``
+would just pass in a ``Charge`` object to a function and behind the scenes, ``stripe-client`` will
+call the HTTP endpoint. The client library may also take care of connection pooling, and may
+provide a more friendly way of interpreting error messages. Basically, distributing a client library
+for your app will help other developers integrate more quickly with the service.
+
+If you are not planning on distributing a client library for developers, one
+can combine ``project-api`` and ``project-application`` into a single project,
+which tends to look like this:
 
 * ``com.example.myapplication``:
 
-  * ``api``: :ref:`man-core-representations`.
+  * ``api``: :ref:`man-core-representations`. Request and response bodies.
   * ``cli``: :ref:`man-core-commands`
-  * ``client``: :ref:`Client <man-client>` implementation for your application
-  * ``core``: Domain implementation
+  * ``client``: :ref:`Client <man-client>` code that accesses external HTTP services.
+  * ``core``: Domain implementation; where objects not used in the API such as POJOs, validations, crypto, etc, reside.
   * ``jdbi``: :ref:`Database <man-jdbi>` access classes
   * ``health``: :ref:`man-core-healthchecks`
   * ``resources``: :ref:`man-core-resources`
   * ``MyApplication``: The :ref:`application <man-core-application>` class
   * ``MyApplicationConfiguration``: :ref:`configuration <man-core-configuration>` class
+
+.. _Stripe: https://stripe.com/docs/api/java
 
 .. _man-core-application:
 
@@ -64,7 +80,7 @@ Configuration
 =============
 
 Dropwizard provides a number of built-in configuration parameters. They are
-well documented in the `example project's configuration`__ and :ref:`configuration refererence <man-configuration>`.
+well documented in the `example project's configuration`__ and :ref:`configuration reference <man-configuration>`.
 
 .. __: https://github.com/dropwizard/dropwizard/blob/master/dropwizard-example/example.yml
 
@@ -305,6 +321,47 @@ connection similar to pre-Dropwizard 1.0.
             - SSL_DHE_DSS_EXPORT_WITH_DES40_CBC_SHA
 
 .. _man-core-bootstrapping:
+
+Since the version 9.4.8 (Dropwizard 1.2.3) Jetty supports native SSL via Google's `Conscrypt`_ which uses `BoringSSL`_
+(Google's fork of OpenSSL) for handling cryptography. You can enable it in Dropwizard by registering the provider
+in your app:
+
+.. code-block:: xml
+
+    <dependency>
+        <groupId>org.conscrypt</groupId>
+        <artifactId>conscrypt-openjdk-uber</artifactId>
+        <version>${conscrypt.version}</version>
+    </dependency>
+
+.. code-block:: java
+
+    static {
+        Security.addProvider(new OpenSSLProvider());
+    }
+
+and setting the JCE provider in the configuration:
+
+.. code-block:: yaml
+
+    server:
+      type: simple
+      connector:
+        type: https
+        jceProvider: Conscrypt
+
+For HTTP/2 servers you need to add an ALPN Conscrypt provider as a dependency.
+
+.. code-block:: xml
+
+    <dependency>
+        <groupId>org.eclipse.jetty</groupId>
+        <artifactId>jetty-alpn-conscrypt-server</artifactId>
+    </dependency>
+
+.. _`Conscrypt`: https://github.com/google/conscrypt
+.. _`BoringSSL`: https://github.com/google/boringssl
+
 
 Bootstrapping
 =============
@@ -732,6 +789,59 @@ slf4j provides the following logging levels:
 ``TRACE``
   Finer-grained informational events than the ``DEBUG`` level.
 
+.. note::
+
+    If you don't want to use Logback, you can exclude it from Dropwizard and use an alternative logging configuration:
+
+    * Exclude Logback from the `dropwizard-core` artifact
+
+        .. code-block:: xml
+
+            <dependency>
+                <groupId>io.dropwizard</groupId>
+                <artifactId>dropwizard-core</artifactId>
+                <version>{$dropwizard.version}</version>
+                <exclusions>
+                    <exclusion>
+                        <groupId>ch.qos.logback</groupId>
+                        <artifactId>logback-classic</artifactId>
+                    </exclusion>
+                    <exclusion>
+                        <groupId>ch.qos.logback</groupId>
+                        <artifactId>logback-access</artifactId>
+                    </exclusion>
+                    <exclusion>
+                        <groupId>org.slf4j</groupId>
+                        <artifactId>log4j-over-slf4j</artifactId>
+                    </exclusion>
+                </exclusions>
+            </dependency>
+
+    * Mark the logging configuration as external in your Dropwizard config
+
+        .. code-block:: yaml
+
+            server:
+              type: simple
+              applicationContextPath: /application
+              adminContextPath: /admin
+              requestLog:
+                type: external
+            logging:
+              type: external
+
+    * Disable bootstrapping Logback in your application
+
+        .. code-block:: java
+
+            public class ExampleApplication extends Application<ExampleConfiguration> {
+
+                @Override
+                protected void bootstrapLogging() {
+                }
+            }
+
+
 .. _man-core-logging-format:
 
 Log Format
@@ -812,6 +922,8 @@ Console Logging
 
 By default, Dropwizard applications log ``INFO`` and higher to ``STDOUT``. You can configure this by
 editing the ``logging`` section of your YAML configuration file:
+
+
 
 .. code-block:: yaml
 
@@ -911,6 +1023,55 @@ appender with different configurations:
 
 .. _man-core-logging-http-config:
 
+JSON Log Format
+---------------
+
+You may prefer to produce logs in a structured format such as JSON, so it can be processed by analytics or BI software.
+For that, add a module to the project for supporting JSON layouts:
+
+.. code-block:: xml
+
+    <dependency>
+        <groupId>io.dropwizard</groupId>
+        <artifactId>dropwizard-json-logging</artifactId>
+        <version>${dropwizard.version}</version>
+    </dependency>
+
+Setup the JSON layout in the configuration file.
+
+For general logging:
+
+.. code-block:: yaml
+
+    logging:
+      appenders:
+        - type: console
+          layout:
+            type: json
+
+The ``json`` layout will produces the following log message:
+
+.. code-block:: json
+
+    {"timestamp":1515002688000, "level":"INFO","logger":"org.eclipse.jetty.server.Server","thread":"main","message":"Started @6505ms"}
+
+For request logging:
+
+.. code-block:: yaml
+
+    server:
+      requestLog:
+        appenders:
+          - type: console
+            layout:
+              type: access-json
+
+The ``access-json`` layout will produces the following log message:
+
+.. code-block:: json
+
+    {"timestamp":1515002688000, "method":"GET","uri":"/hello-world", "status":200, "protocol":"HTTP/1.1","contentLength":37,"remoteAddress":"127.0.0.1","requestTime":5, "userAgent":"Mozilla/5.0"}
+
 Logging Configuration via HTTP
 ------------------------------
 
@@ -921,6 +1082,53 @@ single ``Logger``:
 .. code-block:: shell
 
     curl -X POST -d "logger=com.example.helloworld&level=INFO" http://localhost:8081/tasks/log-level
+
+.. _man-core-logging-filters:
+
+Logging Filters
+---------------
+
+Just because a statement has a level of ``INFO``, doesn't mean it should be logged with other ``INFO`` statements. One can create logging filters that will intercept log statements before they are written and decide if they're allowed. Log filters can work on both regular statements and request log statements. The following example will be for request logging as there are many reasons why certain requests may be excluded from the log:
+
+* Only log requests that have large bodies
+* Only log requests that are slow
+* Only log requests that resulted in a non-2xx status code
+* Exclude requests that contain sensitive information in the URL
+* Exclude healthcheck requests
+
+The example will demonstrate excluding ``/secret`` requests from the log.
+
+.. code-block:: java
+
+    @JsonTypeName("secret-filter-factory")
+    public class SecretFilterFactory implements FilterFactory<IAccessEvent> {
+        @Override
+        public Filter<IAccessEvent> build() {
+            return new Filter<IAccessEvent>() {
+                @Override
+                public FilterReply decide(IAccessEvent event) {
+                    if (event.getRequestURI().equals("/secret")) {
+                        return FilterReply.DENY;
+                    } else {
+                        return FilterReply.NEUTRAL;
+                    }
+                }
+            };
+        }
+    }
+
+Reference ``SecretFilterFactory`` type in our configuration.
+
+.. code-block:: yaml
+
+    server:
+      requestLog:
+        appenders:
+          - type: console
+            filterFactories:
+              - type: secret-filter-factory
+
+The last step is to add our class (in this case ``com.example.SecretFilterFactory``) to ``META-INF/services/io.dropwizard.logging.filter.FilterFactory`` in our resources folder.
 
 .. _man-core-testing-applications:
 
@@ -995,7 +1203,7 @@ Unsurprisingly, most of your day-to-day work with a Dropwizard application will 
 classes, which model the resources exposed in your RESTful API. Dropwizard uses Jersey__ for this,
 so most of this section is just re-hashing or collecting various bits of Jersey documentation.
 
-.. __: http://jersey.java.net/
+.. __: http://jersey.github.io/
 
 Jersey is a framework for mapping various aspects of incoming HTTP requests to POJOs and then
 mapping various aspects of POJOs to outgoing HTTP responses. Here's a basic resource class:
@@ -1222,7 +1430,7 @@ In this example a ``GET`` request to ``/foobar`` will return
     {"code":404,"message":"Collection foobar does not exist"}
 
 One can also take exceptions that your resource may throw and map them to appropriate responses. For instance,
-an endpoint may throw ``IllegalArugmentException`` and it may be worthy enough of a response to warrant a
+an endpoint may throw ``IllegalArgumentException`` and it may be worthy enough of a response to warrant a
 custom metric to track how often the event occurs. Here's an example of such an ``ExceptionMapper``
 
 .. code-block:: java
@@ -1499,7 +1707,7 @@ has a rich api for `filters and interceptors`_ that can be used directly in Drop
 You can stop the request from reaching your resources by throwing a ``WebApplicationException``. Alternatively,
 you can use filters to modify inbound requests or outbound responses.
 
-.. _filters and interceptors: http://jersey.java.net/documentation/latest/filters-and-interceptors.html
+.. _filters and interceptors: http://jersey.github.io/documentation/latest/filters-and-interceptors.html
 
 .. code-block:: java
 
@@ -1521,7 +1729,7 @@ the request is passed through.
 
 Filters can be dynamically bound to resource methods using `DynamicFeature`_:
 
-.. _DynamicFeature: http://jax-rs-spec.java.net/nonav/2.0-rev-a/apidocs/index.html
+.. _DynamicFeature: https://docs.oracle.com/javaee/7/api/javax/ws/rs/container/DynamicFeature.html
 
 .. code-block:: java
 

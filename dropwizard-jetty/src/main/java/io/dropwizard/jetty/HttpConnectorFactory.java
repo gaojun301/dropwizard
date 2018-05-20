@@ -22,7 +22,9 @@ import org.eclipse.jetty.server.ServerConnector;
 import org.eclipse.jetty.util.thread.ScheduledExecutorScheduler;
 import org.eclipse.jetty.util.thread.Scheduler;
 import org.eclipse.jetty.util.thread.ThreadPool;
+import org.hibernate.validator.valuehandling.UnwrapValidatedValue;
 
+import javax.annotation.Nullable;
 import javax.validation.constraints.Min;
 import javax.validation.constraints.NotNull;
 import java.util.Optional;
@@ -219,7 +221,8 @@ public class HttpConnectorFactory implements ConnectorFactory {
     @PortRange
     private int port = 8080;
 
-    private String bindHost = null;
+    @Nullable
+    private String bindHost;
 
     private boolean inheritChannel = false;
 
@@ -247,7 +250,8 @@ public class HttpConnectorFactory implements ConnectorFactory {
     @MinDuration(value = 1, unit = TimeUnit.MILLISECONDS)
     private Duration idleTimeout = Duration.seconds(30);
 
-    private Duration blockingTimeout = null;
+    @Nullable
+    private Duration blockingTimeout;
 
     @NotNull
     @MinSize(value = 1, unit = SizeUnit.BYTES)
@@ -261,17 +265,24 @@ public class HttpConnectorFactory implements ConnectorFactory {
     @MinSize(value = 1, unit = SizeUnit.BYTES)
     private Size maxBufferPoolSize = Size.kilobytes(64);
 
+    private long minRequestDataRate = 0L;
+
     @Min(1)
+    @UnwrapValidatedValue
     private Optional<Integer> acceptorThreads = Optional.empty();
 
     @Min(1)
+    @UnwrapValidatedValue
     private Optional<Integer> selectorThreads = Optional.empty();
 
     @Min(0)
+    @Nullable
     private Integer acceptQueueSize;
 
     private boolean reuseAddress = true;
-    private Duration soLingerTime = null;
+
+    @Nullable
+    private Duration soLingerTime;
     private boolean useServerHeader = false;
     private boolean useDateHeader = true;
     private boolean useForwardedHeaders = true;
@@ -288,6 +299,7 @@ public class HttpConnectorFactory implements ConnectorFactory {
     }
 
     @JsonProperty
+    @Nullable
     public String getBindHost() {
         return bindHost;
     }
@@ -368,6 +380,7 @@ public class HttpConnectorFactory implements ConnectorFactory {
     }
 
     @JsonProperty
+    @Nullable
     public Duration getBlockingTimeout() {
         return blockingTimeout;
     }
@@ -408,6 +421,16 @@ public class HttpConnectorFactory implements ConnectorFactory {
     }
 
     @JsonProperty
+    public long getMinRequestDataRate() {
+        return minRequestDataRate;
+    }
+
+    @JsonProperty
+    public void setMinRequestDataRate(long minRequestDataRate) {
+        this.minRequestDataRate = minRequestDataRate;
+    }
+
+    @JsonProperty
     public Optional<Integer> getAcceptorThreads() {
         return acceptorThreads;
     }
@@ -428,6 +451,7 @@ public class HttpConnectorFactory implements ConnectorFactory {
     }
 
     @JsonProperty
+    @Nullable
     public Integer getAcceptQueueSize() {
         return acceptQueueSize;
     }
@@ -448,6 +472,7 @@ public class HttpConnectorFactory implements ConnectorFactory {
     }
 
     @JsonProperty
+    @Nullable
     public Duration getSoLingerTime() {
         return soLingerTime;
     }
@@ -502,7 +527,7 @@ public class HttpConnectorFactory implements ConnectorFactory {
     public Connector build(Server server,
                            MetricRegistry metrics,
                            String name,
-                           ThreadPool threadPool) {
+                           @Nullable ThreadPool threadPool) {
         final HttpConfiguration httpConfig = buildHttpConfiguration();
 
         final HttpConnectionFactory httpConnectionFactory = buildHttpConnectionFactory(httpConfig);
@@ -527,7 +552,7 @@ public class HttpConnectorFactory implements ConnectorFactory {
                                              Scheduler scheduler,
                                              ByteBufferPool bufferPool,
                                              String name,
-                                             ThreadPool threadPool,
+                                             @Nullable ThreadPool threadPool,
                                              ConnectionFactory... factories) {
         final ServerConnector connector = new ServerConnector(server,
                                                               threadPool,
@@ -552,7 +577,7 @@ public class HttpConnectorFactory implements ConnectorFactory {
 
         connector.setReuseAddress(reuseAddress);
         if (soLingerTime != null) {
-            connector.setSoLingerTime((int) soLingerTime.toSeconds());
+            connector.setSoLingerTime((int) soLingerTime.toMilliseconds());
         }
         connector.setIdleTimeout(idleTimeout.toMilliseconds());
         connector.setName(name);
@@ -574,6 +599,7 @@ public class HttpConnectorFactory implements ConnectorFactory {
         httpConfig.setResponseHeaderSize((int) maxResponseHeaderSize.toBytes());
         httpConfig.setSendDateHeader(useDateHeader);
         httpConfig.setSendServerVersion(useServerHeader);
+        httpConfig.setMinRequestDataRate(minRequestDataRate);
 
         if (useForwardedHeaders) {
             httpConfig.addCustomizer(new ForwardedRequestCustomizer());

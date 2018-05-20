@@ -11,11 +11,15 @@ Dropwizard Configuration Reference
 Servers
 =======
 
+Tweaking some of the options will require good understanding of how Jetty is working. See the `Jetty architecture chapter`_ for reference.
+
 .. code-block:: yaml
 
     server:
       type: default
       maxThreads: 1024
+
+.. _Jetty architecture chapter: http://www.eclipse.org/jetty/documentation/current/architecture.html#basic-architecture
 
 
 .. _man-configuration-all:
@@ -28,8 +32,8 @@ Name                                Default                                     
 =================================== ===============================================  =============================================================================
 type                                default                                          - default
                                                                                      - simple
-maxThreads                          1024                                             The maximum number of threads to use for requests.
-minThreads                          8                                                The minimum number of threads to use for requests.
+maxThreads                          1024                                             The maximum number of threads the thread pool is allowed to grow. Jetty will throw ``java.lang.IllegalStateException: Insufficient threads:`` in case of too aggressive limit on the thread count.
+minThreads                          8                                                The minimum number of threads to keep alive in the thread pool. Note that each Jetty's connector consumes threads from the pool. See :ref:`HTTP connector <man-configuration-http>` how the thread counts are calculated.
 maxQueuedRequests                   1024                                             The maximum number of requests to queue before blocking
                                                                                      the acceptors.
 idleThreadTimeout                   1 minute                                         The amount of time a worker thread can be idle before
@@ -58,6 +62,7 @@ rootPath                            ``/*``                                      
                                                                                      the JAX-RS resources will be served.
 registerDefaultExceptionMappers     true                                             Whether or not the default Jersey ExceptionMappers should be registered.
                                                                                      Set this to false if you want to register your own.
+enableThreadNameFilter              true                                             Whether or not to apply the ``ThreadNameFilter`` that adjusts thread names to include the request method and request URI.
 =================================== ===============================================  =============================================================================
 
 
@@ -297,6 +302,7 @@ HTTP
           minBufferPoolSize: 64 bytes
           bufferPoolIncrement: 1KiB
           maxBufferPoolSize: 64KiB
+          minRequestDataRate: 0
           acceptorThreads: 1
           selectorThreads: 2
           acceptQueueSize: 1024
@@ -341,6 +347,7 @@ blockingTimeout          (none)              The timeout applied to blocking ope
 minBufferPoolSize        64 bytes            The minimum size of the buffer pool.
 bufferPoolIncrement      1KiB                The increment by which the buffer pool should be increased.
 maxBufferPoolSize        64KiB               The maximum size of the buffer pool.
+minRequestDataRate       0                   The minimum request data rate in bytes per second; or <= 0 for no limit
 acceptorThreads          (Jetty's default)   The number of worker threads dedicated to accepting connections.
                                              By default is *max(1, min(4, #CPUs/8))*.
 selectorThreads          (Jetty's default)   The number of worker threads dedicated to sending and receiving data.
@@ -433,7 +440,7 @@ enableCRLDP                      false               Whether or not CRL Distribu
 enableOCSP                       false               Whether or not On-Line Certificate Status Protocol (OCSP) support is enabled.
 maxCertPathLength                (unlimited)         The maximum certification path length.
 ocspResponderUrl                 (none)              The location of the OCSP responder.
-jceProvider                      (none)              The name of the JCE provider to use for cryptographic support.
+jceProvider                      (none)              The name of the JCE provider to use for cryptographic support. See `Oracle documentation <https://docs.oracle.com/javase/8/docs/technotes/guides/security/SunProviders.html>`_ for more information.
 validateCerts                    false               Whether or not to validate TLS certificates before starting. If enabled, Dropwizard
                                                      will refuse to start with expired or otherwise invalid certificates. This option will
                                                      cause unconditional failure in Dropwizard 1.x until a new validation mechanism can be
@@ -475,14 +482,19 @@ For an encrypted connection HTTP/2 uses ALPN protocol. It's a TLS extension, tha
 a protocol to use after the handshake is complete. If either side does not support ALPN, then the protocol will
 be ignored, and an HTTP/1.1 connection over TLS will be used instead.
 
-For this connector to work with ALPN protocol you need to provide alpn-boot library to JVM's bootpath.
-The correct library version depends on a JVM version. Consult Jetty ALPN guide__ for the reference.
+For this connector to work with ALPN protocol you need to either:
+
+* Enable native SSL support via Google's Conscrypt as described in the :ref:`SSL section <man-core-ssl>` of the
+  Core manual; or
+* Provide alpn-boot library to JVM's bootpath. The correct library version depends on the JVM version.
+  Consult Jetty ALPN guide__ for the reference.
 
 .. __: http://www.eclipse.org/jetty/documentation/current/alpn-chapter.html
 
 Note that your JVM also must provide ``TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256`` cipher. The specification states__
 that HTTP/2 deployments must support it to avoid handshake failures. It's the single supported cipher in HTTP/2
-connector by default.
+connector by default. In case you want to support more strong ciphers, you should specify them in the
+``supportedCipherSuites`` parameter along with ``TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256``.
 
 .. __: http://http2.github.io/http2-spec/index.html#rfc.section.9.2.2
 
@@ -500,7 +512,9 @@ This connector extends the attributes that are available to the :ref:`HTTPS conn
           keyStorePassword: changeit
           trustStorePath: /path/to/file # required
           trustStorePassword: changeit
-          supportedCipherSuites: TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256
+          supportedCipherSuites: # optional
+            - TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+            - TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
 
 
 ========================  ========  ===================================================================================
@@ -597,32 +611,33 @@ Console
           discardingThreshold: 0
           timeZone: UTC
           target: stdout
-          logFormat: # TODO
+          logFormat: "%-5p [%d{ISO8601,UTC}] %c: %m%n%rEx"
           filterFactories:
             - type: URI
 
 
-====================== ===========  ===========
-Name                   Default      Description
-====================== ===========  ===========
-type                   REQUIRED     The appender type. Must be ``console``.
-threshold              ALL          The lowest level of events to print to the console.
-queueSize              256          The maximum capacity of the blocking queue.
-discardingThreshold    51           When the blocking queue has only the capacity mentioned in
-                                    discardingThreshold remaining, it will drop events of level TRACE,
-                                    DEBUG and INFO, keeping only events of level WARN and ERROR.
-                                    If no discarding threshold is specified, then a default of queueSize / 5 is used.
-                                    To keep all events, set discardingThreshold to 0.
-timeZone               UTC          The time zone to which event timestamps will be converted.
-target                 stdout       The name of the standard stream to which events will be written.
-                                    Can be ``stdout`` or ``stderr``.
-logFormat              default      The Logback pattern with which events will be formatted. See
-                                    the Logback_ documentation for details.
-filterFactories        (none)       The list of filters to apply to the appender, in order, after
-                                    the thresold.
-neverBlock             false        Prevent the wrapping asynchronous appender from blocking when its underlying queue is full.
-                                    Set to true to disable blocking.
-====================== ===========  ===========
+====================== =======================================  ===========
+Name                   Default                                  Description
+====================== =======================================  ===========
+type                   REQUIRED                                 The appender type. Must be ``console``.
+threshold              ALL                                      The lowest level of events to print to the console.
+queueSize              256                                      The maximum capacity of the blocking queue.
+discardingThreshold    51                                       When the blocking queue has only the capacity mentioned in
+                                                                discardingThreshold remaining, it will drop events of level TRACE,
+                                                                DEBUG and INFO, keeping only events of level WARN and ERROR.
+                                                                If no discarding threshold is specified, then a default of queueSize / 5 is used.
+                                                                To keep all events, set discardingThreshold to 0.
+timeZone               UTC                                      The time zone to which event timestamps will be converted.
+                                                                To use the system/default time zone, set it to ``system``.
+target                 stdout                                   The name of the standard stream to which events will be written.
+                                                                Can be ``stdout`` or ``stderr``.
+logFormat              %-5p [%d{ISO8601,UTC}] %c: %m%n%rEx      The Logback pattern with which events will be formatted. See
+                                                                the Logback_ documentation for details.
+filterFactories        (none)                                   The list of filters to apply to the appender, in order, after
+                                                                the threshold.
+neverBlock             false                                    Prevent the wrapping asynchronous appender from blocking when its underlying queue is full.
+                                                                Set to true to disable blocking.
+====================== =======================================  ===========
 
 .. _Logback: http://logback.qos.ch/manual/layouts.html#conversionWord
 
@@ -646,47 +661,50 @@ File
           archivedLogFilenamePattern: /var/log/myapplication-%d.log
           archivedFileCount: 5
           timeZone: UTC
-          logFormat: # TODO
+          logFormat: "%-5p [%d{ISO8601,UTC}] %c: %m%n%rEx"
           bufferSize: 8KB
+          immediateFlush: true
           filterFactories:
             - type: URI
 
 
-============================ ===========  ==================================================================================================
-Name                         Default      Description
-============================ ===========  ==================================================================================================
-type                         REQUIRED     The appender type. Must be ``file``.
-currentLogFilename           REQUIRED     The filename where current events are logged.
-threshold                    ALL          The lowest level of events to write to the file.
-queueSize                    256          The maximum capacity of the blocking queue.
-discardingThreshold          51           When the blocking queue has only the capacity mentioned in discardingThreshold
-                                          remaining, it will drop events of level TRACE, DEBUG and INFO, keeping only events
-                                          of level WARN and ERROR. If no discarding threshold is specified, then a default
-                                          of queueSize / 5 is used. To keep all events, set discardingThreshold to 0.
-archive                      true         Whether or not to archive old events in separate files.
-archivedLogFilenamePattern   (none)       Required if ``archive`` is ``true``.
-                                          The filename pattern for archived files.
-                                          If ``maxFileSize`` is specified, rollover is size-based, and the pattern must contain ``%i`` for
-                                          an integer index of the archived file.
-                                          Otherwise rollover is date-based, and the pattern must contain ``%d``, which is replaced with the
-                                          date in ``yyyy-MM-dd`` form.
-                                          If the pattern ends with ``.gz`` or ``.zip``, files will be compressed as they are archived.
-archivedFileCount            5            The number of archived files to keep. Must be greater than or equal to ``0``. Zero is a
-                                          special value signifying to keep infinite logs (use with caution)
-maxFileSize                  (unlimited)  The maximum size of the currently active file before a rollover is triggered. The value can be
-                                          expressed in bytes, kilobytes, megabytes, gigabytes, and terabytes by appending B, K, MB, GB, or
-                                          TB to the numeric value.  Examples include 100MB, 1GB, 1TB.  Sizes can also be spelled out, such
-                                          as 100 megabytes, 1 gigabyte, 1 terabyte.
-timeZone                     UTC          The time zone to which event timestamps will be converted.
-logFormat                    default      The Logback pattern with which events will be formatted. See
-                                          the Logback_ documentation for details.
-filterFactories              (none)       The list of filters to apply to the appender, in order, after
-                                          the thresold.
-neverBlock                   false        Prevent the wrapping asynchronous appender from blocking when its underlying queue is full.
-                                          Set to true to disable blocking.
-bufferSize                   8KB          The buffer size of the underlying FileAppender (setting added in logback 1.1.10). Increasing this
-                                          from the default of 8KB to 256KB is reported to significantly reduce thread contention.
-============================ ===========  ==================================================================================================
+============================ =========================================  ==================================================================================================
+Name                         Default                                    Description
+============================ =========================================  ==================================================================================================
+type                         REQUIRED                                   The appender type. Must be ``file``.
+currentLogFilename           REQUIRED                                   The filename where current events are logged.
+threshold                    ALL                                        The lowest level of events to write to the file.
+queueSize                    256                                        The maximum capacity of the blocking queue.
+discardingThreshold          51                                         When the blocking queue has only the capacity mentioned in discardingThreshold
+                                                                        remaining, it will drop events of level TRACE, DEBUG and INFO, keeping only events
+                                                                        of level WARN and ERROR. If no discarding threshold is specified, then a default
+                                                                        of queueSize / 5 is used. To keep all events, set discardingThreshold to 0.
+archive                      true                                       Whether or not to archive old events in separate files.
+archivedLogFilenamePattern   (none)                                     Required if ``archive`` is ``true``.
+                                                                        The filename pattern for archived files.
+                                                                        If ``maxFileSize`` is specified, rollover is size-based, and the pattern must contain ``%i`` for
+                                                                        an integer index of the archived file.
+                                                                        Otherwise rollover is date-based, and the pattern must contain ``%d``, which is replaced with the
+                                                                        date in ``yyyy-MM-dd`` form.
+                                                                        If the pattern ends with ``.gz`` or ``.zip``, files will be compressed as they are archived.
+archivedFileCount            5                                          The number of archived files to keep. Must be greater than or equal to ``0``. Zero is a
+                                                                        special value signifying to keep infinite logs (use with caution)
+maxFileSize                  (unlimited)                                The maximum size of the currently active file before a rollover is triggered. The value can be
+                                                                        expressed in bytes, kilobytes, megabytes, gigabytes, and terabytes by appending B, K, MB, GB, or
+                                                                        TB to the numeric value.  Examples include 100MB, 1GB, 1TB.  Sizes can also be spelled out, such
+                                                                        as 100 megabytes, 1 gigabyte, 1 terabyte.
+timeZone                     UTC                                        The time zone to which event timestamps will be converted.
+logFormat                    %-5p [%d{ISO8601,UTC}] %c: %m%n%rEx        The Logback pattern with which events will be formatted. See
+                                                                        the Logback_ documentation for details.
+filterFactories              (none)                                     The list of filters to apply to the appender, in order, after
+                                                                        the threshold.
+neverBlock                   false                                      Prevent the wrapping asynchronous appender from blocking when its underlying queue is full.
+                                                                        Set to true to disable blocking.
+bufferSize                   8KB                                        The buffer size of the underlying FileAppender (setting added in logback 1.1.10). Increasing this
+                                                                        from the default of 8KB to 256KB is reported to significantly reduce thread contention.
+immediateFlush               true                                       If set to true, log events will be immediately flushed to disk. Immediate flushing is safer, but
+                                                                        it degrades logging throughput.
+============================ =========================================  ==================================================================================================
 
 
 .. _man-configuration-logging-syslog:
@@ -705,31 +723,85 @@ Syslog
           facility: local0
           threshold: ALL
           stackTracePrefix: \t
-          logFormat: # TODO
+          logFormat: "%-5p [%d{ISO8601,UTC}] %c: %m%n%rEx"
           filterFactories:
             - type: URI
 
 
-============================ ===========  ==================================================================================================
-Name                         Default      Description
-============================ ===========  ==================================================================================================
-host                         localhost    The hostname of the syslog server.
-port                         514          The port on which the syslog server is listening.
-facility                     local0       The syslog facility to use. Can be either ``auth``, ``authpriv``,
-                                          ``daemon``, ``cron``, ``ftp``, ``lpr``, ``kern``, ``mail``,
-                                          ``news``, ``syslog``, ``user``, ``uucp``, ``local0``,
-                                          ``local1``, ``local2``, ``local3``, ``local4``, ``local5``,
-                                          ``local6``, or ``local7``.
-threshold                    ALL          The lowest level of events to write to the file.
-logFormat                    default      The Logback pattern with which events will be formatted. See
-                                          the Logback_ documentation for details.
-stackTracePrefix             \t           The prefix to use when writing stack trace lines (these are sent
-                                          to the syslog server separately from the main message)
-filterFactories              (none)       The list of filters to apply to the appender, in order, after
-                                          the thresold.
-neverBlock                   false        Prevent the wrapping asynchronous appender from blocking when its underlying queue is full.
-                                          Set to true to disable blocking.
-============================ ===========  ==================================================================================================
+============================ =====================================  ==================================================================================================
+Name                         Default                                Description
+============================ =====================================  ==================================================================================================
+host                         localhost                              The hostname of the syslog server.
+port                         514                                    The port on which the syslog server is listening.
+facility                     local0                                 The syslog facility to use. Can be either ``auth``, ``authpriv``,
+                                                                    ``daemon``, ``cron``, ``ftp``, ``lpr``, ``kern``, ``mail``,
+                                                                    ``news``, ``syslog``, ``user``, ``uucp``, ``local0``,
+                                                                    ``local1``, ``local2``, ``local3``, ``local4``, ``local5``,
+                                                                    ``local6``, or ``local7``.
+threshold                    ALL                                    The lowest level of events to write to the file.
+logFormat                    %-5p [%d{ISO8601,UTC}] %c: %m%n%rEx    The Logback pattern with which events will be formatted. See
+                                                                    the Logback_ documentation for details.
+stackTracePrefix             \t                                     The prefix to use when writing stack trace lines (these are sent
+                                                                    to the syslog server separately from the main message)
+filterFactories              (none)                                 The list of filters to apply to the appender, in order, after
+                                                                    the threshold.
+neverBlock                   false                                  Prevent the wrapping asynchronous appender from blocking when its underlying queue is full.
+                                                                    Set to true to disable blocking.
+============================ =====================================  ==================================================================================================
+
+
+.. _man-configuration-logging-tcp:
+
+TCP
+------
+
+.. code-block:: yaml
+
+    logging:
+      level: INFO
+      appenders:
+        - type: tcp
+          host: localhost
+          port: 4560
+          connectionTimeout: 500ms
+          immediateFlush: true
+          sendBufferSize: 8KB
+
+
+============================ =============  ==================================================================
+Name                         Default        Description
+============================ =============  ==================================================================
+host                         localhost      The hostname of the TCP server.
+port                         4560           The port on which the TCP server is listening.
+connectionTimeout            500ms          The timeout to connect to the TCP server.
+immediateFlush               true           If set to true, log events will be immediately send to the server
+                                            Immediate flushing is safer, but it degrades logging throughput.
+sendBufferSize               8KB            The buffer size of the underlying SocketAppender.
+                                            Takes into effect if immediateFlush is disabled.
+============================ =============  ==================================================================
+
+
+.. _man-configuration-logging-udp:
+
+UDP
+------
+
+.. code-block:: yaml
+
+    logging:
+      level: INFO
+      appenders:
+        - type: udp
+          host: localhost
+          port: 514
+
+
+============================ =============  ==================================================================
+Name                         Default        Description
+============================ =============  ==================================================================
+host                         localhost      The hostname of the UDP server.
+port                         514            The port on which the UDP server is listening.
+============================ =============  ==================================================================
 
 
 .. _man-configuration-logging-filter-factories:
@@ -752,6 +824,114 @@ Name                   Default      Description
 ====================== ===========  ================
 type                   REQUIRED     The filter type.
 ====================== ===========  ================
+
+.. _man-configuration-json-layout:
+
+JSON layout
+-----------
+
+.. code-block:: yaml
+
+    layout:
+      type: json
+      timestampFormat: "yyyy-MM-dd'T'HH:mm:ss.SSSZ"
+      prettyPrint: false
+      appendLineSeparator: true
+      includes: [timestamp, threadName, level, loggerName, message, mdc, exception]
+      customFieldNames:
+        timestamp: "@timestamp"
+      additionalFields:
+        service-name: "user-service"
+      includesMdcKeys: [userId]
+
+
+=======================  =====================  ================
+Name                     Default                Description
+=======================  =====================  ================
+timestampFormat          (none)                 By default, the timestamp is not formatted. To customize how timestamps are formatted,
+                                                set the property to the corresponding DateTimeFormatter_ string or one of the
+                                                predefined formats (e.g. ``ISO_LOCAL_TIME``, ``ISO_ZONED_DATE_TIME``, ``RFC_1123_DATE_TIME``).
+prettyPrint              false                  Whether the JSON output should be formatted for human readability.
+appendLineSeparator      true                   Whether to append a line separator at the end of the message formatted as JSON.
+includes                 (timestamp, level,
+                         threadName,  mdc,
+                         loggerName, message,
+                         exception)             Set of logging event attributes to include in the JSON map:
+
+                                                - ``timestamp``   *true*   Whether to include the timestamp as the ``timestamp`` field.
+                                                - ``level``       *true*   Whether to include the logging level as the ``level`` field.
+                                                - ``threadName``  *true*   Whether to include the thread name as the ``thread`` field.
+                                                - ``mdc``         *true*   Whether to include the MDC properties as the ``mdc`` field.
+                                                - ``loggerName``  *true*   Whether to include the logger name as the ``logger`` field.
+                                                - ``message``     *true*   Whether to include the formatted message as the ``message`` field.
+                                                - ``exception``   *true*   Whether to log exceptions. If the property enabled and there is an exception, it will be formatted to a string as the ``exception`` field.
+                                                - ``contextName`` *false*  Whether to include the logging context name as the ``context`` field .
+customFieldNames         (empty)                Map of field name replacements . For example ``(requestTime:request_time, userAgent:user_agent)``.
+additionalFields         (empty)                Map of fields to add in the JSON map.
+includesMdcKeys          (empty)                Set of MDC keys which should be included in the JSON map. By default includes everything.
+=======================  =====================  ================
+
+.. _DateTimeFormatter:  https://docs.oracle.com/javase/8/docs/api/java/time/format/DateTimeFormatter.html
+
+.. _man-configuration-json-access-layout:
+
+JSON access log layout
+----------------------
+
+.. code-block:: yaml
+
+    layout:
+      type: access-json
+      timestampFormat: "yyyy-MM-dd'T'HH:mm:ss.SSSZ"
+      prettyPrint: false
+      appendLineSeparator: true
+      includes: [timestamp, remoteAddress, remoteUser, protocol, method, requestUri, statusCode, requestTime, contentLength, userAgent]
+      requestHeaders:
+        - X-Request-Id
+      responseHeaders:
+        - X-Request-Id
+      customFieldNames:
+        timestamp: "@timestamp"
+      additionalFields:
+        service-name: "user-service"
+
+=======================  ===========================  ================
+Name                     Default                      Description
+=======================  ===========================  ================
+timestampFormat          (none)                       By default, the timestamp is not formatted. To customize how timestamps are formatted,
+                                                      set the property to the corresponding DateTimeFormatter_ string or one of the predefined formats
+                                                      (e.g. ``ISO_LOCAL_TIME``, ``ISO_ZONED_DATE_TIME``,``RFC_1123_DATE_TIME``).
+prettyPrint              false                        Whether the JSON output should be formatted for human readability.
+appendLineSeparator      true                         Whether to append a line separator at the end of the message formatted as JSON.
+includes                 (timestamp, remoteAddress,
+                         protocol, method,
+                         requestUri, statusCode,
+                         requestTime, contentLength,
+                         userAgent)                   Set of logging event attributes to include in the JSON map:
+
+                                                      - ``contentLength``     *true*     Whether to include the response content length, if it's known as the ``contentLength`` field.
+                                                      - ``method``            *true*     Whether to include the request HTTP method as the ``method`` field.
+                                                      - ``remoteAddress``     *true*     Whether to include the IP address of the client or last proxy that sent the request as the ``remoteAddress`` field.
+                                                      - ``remoteUser``        *true*     Whether to include information about the remote user as the ``remoteUser`` field.
+                                                      - ``requestTime``       *true*     Whether to include the time elapsed between receiving the request and logging it as the ``requestTime`` field. Time is in *ms*.
+                                                      - ``requestUri``        *true*     Whether to include the URI of the request as the ``uri`` field.
+                                                      - ``statusCode``        *true*     Whether to include the status code of the response as the ``status`` field.
+                                                      - ``protocol``          *true*     Whether to include the request HTTP protocol as the ``protocol`` field.
+                                                      - ``timestamp``         *true*     Whether to include the timestamp of the event the ``timestamp`` field.
+                                                      - ``userAgent``         *true*     Whether to include the user agent of the request as the ``userAgent`` field.
+                                                      - ``requestParameters`` *false*    Whether to include the request parameters as the ``params`` field.
+                                                      - ``requestContent``    *false*    Whether to include the body of the request as the ``requestContent`` field.
+                                                      - ``requestUrl``        *false*    Whether to include the request URL (method, URI, query parameters, protocol) as the ``contentLength`` field.
+                                                      - ``remoteHost``        *false*    Whether to include the fully qualified name of the client or the last proxy that sent the request as the ``remoteHost`` field.
+                                                      - ``responseContent``   *false*    Whether to include the response body as the ``responseContent`` field.
+                                                      - ``serverName``        *false*    Whether to include the name of the server to which the request was sent as the ``serverName`` field.
+requestHeaders           (empty)                      Set of request headers included in the JSON map as the ``headers`` field.
+responseHeaders          (empty)                      Set of response headers included in the JSON map as the ``responseHeaders`` field.
+customFieldNames         (empty)                      Map of field name replacements in the JSON map. For example ``requestTime:request_time, userAgent:user_agent)``.
+additionalFields         (empty)                      Map of fields to add in the JSON map.
+=======================  ===========================  ================
+
+.. _DateTimeFormatter:  https://docs.oracle.com/javase/8/docs/api/java/time/format/DateTimeFormatter.html
 
 .. _man-configuration-metrics:
 
@@ -792,6 +972,8 @@ The following options are available for all metrics reporters.
           rateUnit: seconds
           excludes: (none)
           includes: (all)
+          excludesAttributes: (none)
+          includesAttributes: (all)
           useRegexFilters: false
           frequency: 1 minute
 
@@ -803,7 +985,12 @@ durationUnit           milliseconds   The unit to report durations as. Overrides
 rateUnit               seconds        The unit to report rates as. Overrides per-metric rate units.
 excludes               (none)         Metrics to exclude from reports, by name. When defined, matching metrics will not be reported.
 includes               (all)          Metrics to include in reports, by name. When defined, only these metrics will be reported.
+excludesAttributes     (none)         Metric attributes to exclude from reports, by name (e.g. ``p98``, ``m15_rate``, ``stddev``).
+                                      When defined, matching metrics attributes will not be reported.
+includesAttributes     (all)          Metrics attributes to include in reports, by name (e.g. ``p98``, ``m15_rate``, ``stddev``).
+                                      When defined, only these attributes will be reported.
 useRegexFilters        false          Indicates whether the values of the 'includes' and 'excludes' fields should be treated as regular expressions or not.
+useSubstringMatching   false          Uses a substring matching strategy to determine whether a metric should be processed.
 frequency              (none)         The frequency to report metrics. Overrides the default.
 ====================== =============  ===========
 
@@ -814,6 +1001,8 @@ The inclusion and exclusion rules are defined as:
 * If **excludes** is empty, no metrics are excluded;
 * If **excludes** is not empty, then exclusion rules take precedence over inclusion rules. Thus if a name matches the exclusion rules it will not be included in reports even if it also matches the inclusion rules.
 
+When neither **useRegexFilters** nor **useSubstringMatching** are enabled, a default exact matching strategy will be used to determine whether a metric should be processed.
+In case both **useRegexFilters** and **useSubstringMatching** are set, **useRegexFilters** takes precedence over **useSubstringMatching**.
 
 .. _man-configuration-metrics-formatted:
 
@@ -888,50 +1077,6 @@ file                   No default       The CSV file to write metrics to.
 ====================== ===============  ===========
 
 
-.. _man-configuration-metrics-ganglia:
-
-Ganglia Reporter
-----------------
-
-Reports metrics periodically to Ganglia.
-
-Extends the attributes that are available to :ref:`all reporters <man-configuration-metrics-all>`
-
-.. note::
-
-    You will need to add ``dropwizard-metrics-ganglia`` to your POM.
-
-.. code-block:: yaml
-
-    metrics:
-      reporters:
-        - type: ganglia
-          host: localhost
-          port: 8649
-          mode: unicast
-          ttl: 1
-          uuid: (none)
-          spoof: localhost:8649
-          tmax: 60
-          dmax: 0
-
-
-====================== ===============  ====================================================================================================
-Name                   Default          Description
-====================== ===============  ====================================================================================================
-host                   localhost        The hostname (or group) of the Ganglia server(s) to report to.
-port                   8649             The port of the Ganglia server(s) to report to.
-mode                   unicast          The UDP addressing mode to announce the metrics with. One of ``unicast``
-                                        or ``multicast``.
-ttl                    1                The time-to-live of the UDP packets for the announced metrics.
-uuid                   (none)           The UUID to tag announced metrics with.
-spoof                  (none)           The hostname and port to use instead of this nodes for the announced metrics.
-                                        In the format ``hostname:port``.
-tmax                   60               The tmax value to announce metrics with.
-dmax                   0                The dmax value to announce metrics with.
-====================== ===============  ====================================================================================================
-
-
 .. _man-configuration-metrics-graphite:
 
 Graphite Reporter
@@ -951,16 +1096,18 @@ Extends the attributes that are available to :ref:`all reporters <man-configurat
       reporters:
         - type: graphite
           host: localhost
-          port: 8080
+          port: 2003
           prefix: <prefix>
+          transport: tcp
 
 
 ====================== ===============  ====================================================================================================
 Name                   Default          Description
 ====================== ===============  ====================================================================================================
 host                   localhost        The hostname of the Graphite server to report to.
-port                   8080             The port of the Graphite server to report to.
+port                   2003             The port of the Graphite server to report to.
 prefix                 (none)           The prefix for Metric key names to report to Graphite.
+transport              tcp              The type of transport to report to Graphite with ("tcp" or "udp").
 ====================== ===============  ====================================================================================================
 
 
@@ -1061,29 +1208,40 @@ Proxy
         auth:
           username: secret
           password: stuff
+          authScheme: NTLM
+          realm: realm
+          hostname: host
+          domain: WINDOWSDOMAIN
+          credentialType: NT
         nonProxyHosts:
           - localhost
           - '192.168.52.*'
           - '*.example.com'
 
 
-=============   =================  ======================================================================
+==============  =================  =====================================================================================
 Name            Default            Description
-=============   =================  ======================================================================
+==============  =================  =====================================================================================
 host            REQUIRED           The proxy server host name or ip address.
 port            (scheme default)   The proxy server port.
                                    If the port is not set then the scheme default port is used.
 scheme          http               The proxy server URI scheme. HTTP and HTTPS schemas are permitted.
                                    By default HTTP scheme is used.
-auth            (none)             The proxy server BASIC authentication credentials.
+auth            (none)             The proxy server ``Basic`` or ``NTLM`` authentication schemes.
                                    If they are not set then no credentials will be passed to the server.
 username        REQUIRED           The username used to connect to the server.
 password        REQUIRED           The password used to connect to the server.
-
+authScheme      Basic              The authentication scheme used by the. Allowed options are:
+                                   ``Basic``, ``NTLM``
+realm           (none)             The realm, used for NTLM authentication.
+hostname        (none)             The hostname of the windows workstation, used for NTLM authentication.
+domain          (none)             The Windows Domain, used for NTLM authentication.
+credentialType  (none)             The Apache HTTP Client Credentials imeplementation used for proxy authentication.
+                                   Allowed options are: ``UsernamePassword`` or ``NT``
 nonProxyHosts   (none)             List of patterns of hosts that should be reached without proxy.
                                    The patterns may contain symbol '*' as a wildcard.
                                    If a host matches one of the patterns it will be reached through a direct connection.
-=============   =================  ======================================================================
+==============  =================  =====================================================================================
 
 
 .. _man-configuration-clients-http-tls:
@@ -1096,6 +1254,7 @@ TLS
     httpClient:
       tls:
         protocol: TLSv1.2
+        provider: SunJSSE
         verifyHostname: true
         keyStorePath: /path/to/file
         keyStorePassword: changeit
@@ -1106,6 +1265,7 @@ TLS
         trustSelfSignedCertificates: false
         supportedProtocols: TLSv1.1,TLSv1.2
         supportedCipherSuites: TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256
+        certAlias: alias-of-specific-cert
 
 
 ===========================  =================  ============================================================================================================================
@@ -1114,6 +1274,8 @@ Name                         Default            Description
 protocol                     TLSv1.2            The default protocol the client will attempt to use during the SSL Handshake.
                                                 See
                                                 `here <http://docs.oracle.com/javase/8/docs/technotes/guides/security/StandardNames.html#SSLContext>`_ for more information.
+provider                     (none)             The name of the JCE provider to use on client side for cryptographic support (for example, SunJCE, Conscrypt, BC, etc).
+                                                See `Oracle documentation <https://docs.oracle.com/javase/8/docs/technotes/guides/security/SunProviders.html>`_ for more information.
 verifyHostname               true               Whether to verify the hostname of the server against the hostname presented in the server certificate.
 keyStorePath                 (none)             The path to the Java key store which contains the client certificate and private key.
 keyStorePassword             (none)             The password used to access the key store.
@@ -1127,6 +1289,8 @@ supportedProtocols           (none)             A list of protocols (e.g., ``SSL
                                                 other protocols will be refused.
 supportedCipherSuites        (none)             A list of cipher suites (e.g., ``TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256``) which
                                                 are supported. All other cipher suites will be refused.
+certAlias                    (none)             The alias of a specific client certificate to present when authenticating. Use this when
+                                                the specified keystore has multiple certificates to force use of a non-default certficate.
 ===========================  =================  ============================================================================================================================
 
 
@@ -1285,6 +1449,13 @@ validationInterval              30 seconds               To avoid excess validat
 
 validatorClassName              none                     Name of a class of a custom validator implementation, which
                                                          will be used for validating connections.
+jdbcInterceptors                none                       A semicolon separated list of JDBC interceptor classnames.
+
+ignoreExceptionOnPreLoad        false                    Flag whether ignore error of connection creation while
+                                                         initializing the pool. Set to true if you want to ignore
+                                                         error of connection creation while initializing the pool.
+                                                         Set to false if you want to fail the initialization of the
+                                                         pool by throwing exception.
 ============================    =====================    ===============================================================
 
 .. _man-configuration-polymorphic:

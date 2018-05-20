@@ -32,13 +32,15 @@ You can pass configuration through to view renderers by overriding ``getViewConf
         });
     }
 
-The returned map should have, for each extension (such as ``.ftl``), a ``Map<String, String>`` describing how to configure the renderer. Specific keys and their meanings can be found in the FreeMarker and Mustache documentation:
+The returned map should have, for each renderer (such as ``freemarker`` or ``mustache``), a ``Map<String, String>`` describing how to configure the renderer. Specific keys and their meanings can be found in the FreeMarker and Mustache documentation:
 
 .. code-block:: yaml
 
     views:
-      .ftl:
-        strict_syntax: yes
+      freemarker:
+        strict_syntax: true
+      mustache:
+        cache: false
 
 Then, in your :ref:`resource method <man-core-resources>`, add a ``View`` class:
 
@@ -61,7 +63,7 @@ Then, in your :ref:`resource method <man-core-resources>`, add a ``View`` class:
 ``com.example.service.PersonView``, Dropwizard would then look for the file
 ``src/main/resources/com/example/service/person.ftl``.
 
-If your template ends with ``.ftl``, it'll be interpreted as a FreeMarker_ template. If it ends with
+If your template path contains ``.ftl``, ``.flth``, or ``.ftlx``, it'll be interpreted as a FreeMarker_ template. If it contains
 ``.mustache``, it'll be interpreted as a Mustache template.
 
 .. tip::
@@ -124,7 +126,7 @@ Template Errors
 ===============
 
 By default, if there is an error with the template (eg. the template file is not found or there is a
-compilation error with the template), the user will receive a ``500 Internal Sever Error`` with a
+compilation error with the template), the user will receive a ``500 Internal Server Error`` with a
 generic HTML message. The exact error will logged under error mode.
 
 To customize the behavior, create an exception mapper that will override the default one by looking
@@ -163,7 +165,7 @@ mustache templates can't be found:
 
 
 Caching
-===============
+=======
 By default templates are cached to improve loading time. If you want to disable it during the development mode,
 set the ``cache`` property to ``false`` in the view configuration.
 
@@ -172,3 +174,31 @@ set the ``cache`` property to ``false`` in the view configuration.
     views:
       .mustache:
         cache: false
+
+Custom Error Pages
+==================
+
+To get HTML error pages that fit in with your application, you can use a custom error view. Create a ``View`` that
+takes an ``ErrorMessage`` parameter in its constructor, and hook it up by registering a instance of
+``ErrorEntityWriter``.
+
+.. code-block:: java
+
+    env.jersey().register(new ErrorEntityWriter<ErrorMessage,View>(MediaType.TEXT_HTML_TYPE, View.class) {
+        @Override
+        protected View getRepresentation(ErrorMessage errorMessage) {
+            return new ErrorView(errorMessage);
+        }
+    });
+
+For validation error messages, you'll need to register another ``ErrorEntityWriter`` that handles
+``ValidationErrorMessage`` objects.
+
+.. code-block:: java
+
+    env.jersey().register(new ErrorEntityWriter<ValidationErrorMessage,View>(MediaType.TEXT_HTML_TYPE, View.class) {
+        @Override
+        protected View getRepresentation(ValidationErrorMessage message) {
+            return new ValidationErrorView(message);
+        }
+    });

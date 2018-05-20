@@ -6,6 +6,7 @@ import io.dropwizard.validation.ValidationMethod;
 import org.hibernate.validator.constraints.NotEmpty;
 
 import javax.annotation.Nullable;
+
 import java.io.File;
 import java.util.List;
 
@@ -14,15 +15,22 @@ public class TlsConfiguration {
     @NotEmpty
     private String protocol = "TLSv1.2";
 
+    @Nullable
+    private String provider;
+
+    @Nullable
     private File keyStorePath;
 
+    @Nullable
     private String keyStorePassword;
 
     @NotEmpty
     private String keyStoreType = "JKS";
 
+    @Nullable
     private File trustStorePath;
 
+    @Nullable
     private String trustStorePassword;
 
     @NotEmpty
@@ -38,6 +46,9 @@ public class TlsConfiguration {
     @Nullable
     private List<String> supportedCiphers = null;
 
+    @Nullable
+    private String certAlias = null;
+
     @JsonProperty
     public void setTrustSelfSignedCertificates(boolean trustSelfSignedCertificates) {
         this.trustSelfSignedCertificates = trustSelfSignedCertificates;
@@ -49,6 +60,7 @@ public class TlsConfiguration {
     }
 
     @JsonProperty
+    @Nullable
     public File getKeyStorePath() {
         return keyStorePath;
     }
@@ -59,6 +71,7 @@ public class TlsConfiguration {
     }
 
     @JsonProperty
+    @Nullable
     public String getKeyStorePassword() {
         return keyStorePassword;
     }
@@ -87,8 +100,8 @@ public class TlsConfiguration {
         this.trustStoreType = trustStoreType;
     }
 
-
     @JsonProperty
+    @Nullable
     public File getTrustStorePath() {
         return trustStorePath;
     }
@@ -99,6 +112,7 @@ public class TlsConfiguration {
     }
 
     @JsonProperty
+    @Nullable
     public String getTrustStorePassword() {
         return trustStorePassword;
     }
@@ -128,6 +142,17 @@ public class TlsConfiguration {
         this.protocol = protocol;
     }
 
+    @JsonProperty
+    @Nullable
+    public String getProvider() {
+        return provider;
+    }
+
+    @JsonProperty
+    public void setProvider(@Nullable String provider) {
+        this.provider = provider;
+    }
+
     @Nullable
     @JsonProperty
     public List<String> getSupportedCiphers() {
@@ -148,6 +173,17 @@ public class TlsConfiguration {
     @JsonProperty
     public void setSupportedProtocols(@Nullable List<String> supportedProtocols) {
         this.supportedProtocols = supportedProtocols;
+    }
+
+    @Nullable
+    @JsonProperty
+    public String getCertAlias() {
+        return certAlias;
+    }
+
+    @JsonProperty
+    public void setCertAlias(@Nullable String certAlias) {
+        this.certAlias = certAlias;
     }
 
     @ValidationMethod(message = "keyStorePassword should not be null or empty if keyStorePath not null")

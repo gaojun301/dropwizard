@@ -6,6 +6,7 @@ import com.codahale.metrics.health.HealthCheckRegistry;
 import com.codahale.metrics.health.SharedHealthCheckRegistries;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
+
 import io.dropwizard.jersey.DropwizardResourceConfig;
 import io.dropwizard.jersey.setup.JerseyContainerHolder;
 import io.dropwizard.jersey.setup.JerseyEnvironment;
@@ -14,6 +15,7 @@ import io.dropwizard.jetty.MutableServletContextHandler;
 import io.dropwizard.jetty.setup.ServletEnvironment;
 import io.dropwizard.lifecycle.setup.LifecycleEnvironment;
 
+import javax.annotation.Nullable;
 import javax.servlet.Servlet;
 import javax.validation.Validator;
 import java.util.concurrent.ArrayBlockingQueue;
@@ -56,7 +58,7 @@ public class Environment {
                        ObjectMapper objectMapper,
                        Validator validator,
                        MetricRegistry metricRegistry,
-                       ClassLoader classLoader,
+                       @Nullable ClassLoader classLoader,
                        HealthCheckRegistry healthCheckRegistry) {
         this.name = name;
         this.objectMapper = objectMapper;
@@ -70,11 +72,13 @@ public class Environment {
 
         this.adminContext = new MutableServletContextHandler();
         adminContext.setClassLoader(classLoader);
+
         this.adminEnvironment = new AdminEnvironment(adminContext, healthCheckRegistry, metricRegistry);
 
         this.lifecycleEnvironment = new LifecycleEnvironment();
 
         final DropwizardResourceConfig jerseyConfig = new DropwizardResourceConfig(metricRegistry);
+        jerseyConfig.setContextPath(servletContext.getContextPath());
 
         this.jerseyServletContainer = new JerseyContainerHolder(new JerseyServletContainer(jerseyConfig));
         this.jerseyEnvironment = new JerseyEnvironment(jerseyServletContainer, jerseyConfig);
@@ -88,15 +92,17 @@ public class Environment {
                 .rejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy())
                 .build();
 
+        // Set the default metric registry to the one in this environment, if
+        // the default isn't already set. If a default is already registered,
+        // ignore the exception.
         try {
-            SharedMetricRegistries.getDefault();
-        } catch (IllegalStateException e) {
             SharedMetricRegistries.setDefault("default", metricRegistry);
+        } catch (IllegalStateException ignored) {
         }
+
         try {
-            SharedHealthCheckRegistries.getDefault();
-        } catch (IllegalStateException e) {
             SharedHealthCheckRegistries.setDefault("default", healthCheckRegistry);
+        } catch (IllegalStateException ignored) {
         }
     }
 
@@ -107,7 +113,7 @@ public class Environment {
                        ObjectMapper objectMapper,
                        Validator validator,
                        MetricRegistry metricRegistry,
-                       ClassLoader classLoader) {
+                       @Nullable ClassLoader classLoader) {
         this(name, objectMapper, validator, metricRegistry, classLoader, new HealthCheckRegistry());
     }
 
@@ -196,6 +202,7 @@ public class Environment {
         return servletContext;
     }
 
+    @Nullable
     public Servlet getJerseyServletContainer() {
         return jerseyServletContainer.getContainer();
     }

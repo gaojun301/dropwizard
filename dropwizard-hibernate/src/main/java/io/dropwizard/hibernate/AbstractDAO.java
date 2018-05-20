@@ -49,9 +49,20 @@ public class AbstractDAO<E> {
      *
      * @return a new {@link Criteria} query
      * @see Session#createCriteria(Class)
+     * @deprecated Use {@link AbstractDAO#criteriaQuery()} instead.
      */
+    @Deprecated
     protected Criteria criteria() {
         return currentSession().createCriteria(entityClass);
+    }
+
+    /**
+     * Creates a new {@link CriteriaQuery} for {@code <E>}.
+     *
+     * @return a new {@link CriteriaQuery} query
+     */
+    protected CriteriaQuery<E> criteriaQuery() {
+        return this.currentSession().getCriteriaBuilder().createQuery(getEntityClass());
     }
 
     /**

@@ -34,6 +34,7 @@ defaultTransactionIsolation: read-committed
 removeAbandoned: true
 removeAbandonedTimeout: 15s
 useFairQueue: false
+ignoreExceptionOnPreLoad: true
 
 logAbandonedConnections: true
 logValidationErrors: true
@@ -44,3 +45,4 @@ checkConnectionOnConnect: false
 checkConnectionOnReturn: true
 
 validatorClassName: io.dropwizard.db.CustomConnectionValidator
+jdbcInterceptors: "StatementFinalizer;SlowQueryReport"

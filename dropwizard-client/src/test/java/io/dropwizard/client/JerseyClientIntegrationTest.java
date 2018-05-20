@@ -8,6 +8,9 @@ import com.sun.net.httpserver.Headers;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import io.dropwizard.jackson.Jackson;
+import org.apache.http.client.HttpRequestRetryHandler;
+import org.apache.http.protocol.HttpContext;
+import org.glassfish.jersey.client.authentication.HttpAuthenticationFeature;
 import org.glassfish.jersey.logging.LoggingFeature;
 import org.junit.After;
 import org.junit.Before;
@@ -15,6 +18,7 @@ import org.junit.Test;
 
 import javax.ws.rs.client.Client;
 import javax.ws.rs.client.Entity;
+import javax.ws.rs.client.InvocationCallback;
 import javax.ws.rs.client.WebTarget;
 import javax.ws.rs.core.HttpHeaders;
 import javax.ws.rs.core.Response;
@@ -24,8 +28,10 @@ import java.io.InputStreamReader;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
 
@@ -156,11 +162,46 @@ public class JerseyClientIntegrationTest {
         postRequest(configuration);
     }
 
+    @Test
+    public void testRetryHandler() throws Exception {
+        httpServer.createContext("/register", httpExchange -> {
+            try {
+                Headers requestHeaders = httpExchange.getRequestHeaders();
+                assertThat(requestHeaders.get(TRANSFER_ENCODING)).containsExactly(CHUNKED);
+                assertThat(requestHeaders.get(HttpHeaders.CONTENT_LENGTH)).isNull();
+                assertThat(requestHeaders.get(HttpHeaders.CONTENT_ENCODING)).isNull();
+                assertThat(requestHeaders.get(HttpHeaders.ACCEPT_ENCODING)).isNull();
+
+                checkBody(httpExchange, false);
+
+                httpExchange.getResponseHeaders().add(HttpHeaders.CONTENT_TYPE, APPLICATION_JSON);
+                httpExchange.sendResponseHeaders(200, 0);
+                httpExchange.getResponseBody().write(JSON_TOKEN.getBytes(StandardCharsets.UTF_8));
+                httpExchange.getResponseBody().close();
+            } finally {
+                httpExchange.close();
+            }
+        });
+        httpServer.start();
+
+        JerseyClientConfiguration configuration = new JerseyClientConfiguration();
+        configuration.setGzipEnabled(false);
+        configuration.setGzipEnabledForRequests(false);
+
+        postRequest(configuration);
+    }
+
     private void postRequest(JerseyClientConfiguration configuration) {
         ExecutorService executor = Executors.newSingleThreadExecutor();
         Client jersey = new JerseyClientBuilder(new MetricRegistry())
                 .using(executor, JSON_MAPPER)
                 .using(configuration)
+                .using(new HttpRequestRetryHandler() {
+                    @Override
+                    public boolean retryRequest(IOException e, int i, HttpContext httpContext) {
+                        return false;
+                    }
+                })
                 .build("jersey-test");
         Response response = jersey.target("http://127.0.0.1:" + httpServer.getAddress().getPort() + "/register")
                 .request()
@@ -309,6 +350,50 @@ public class JerseyClientIntegrationTest {
                 .invoke()
                 .readEntity(String.class);
         assertThat(secondResponse).isEqualTo("Hello World!");
+
+        executor.shutdown();
+        jersey.close();
+    }
+
+    @Test
+    public void testAsyncWithCustomized() throws Exception {
+        httpServer.createContext("/test", httpExchange -> {
+            try {
+                httpExchange.getResponseHeaders().add(HttpHeaders.CONTENT_TYPE, TEXT_PLAIN);
+                byte[] body = "Hello World!".getBytes(StandardCharsets.UTF_8);
+                httpExchange.sendResponseHeaders(200, body.length);
+                httpExchange.getResponseBody().write(body);
+            } finally {
+                httpExchange.close();
+            }
+        });
+        httpServer.start();
+
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        Client jersey = new JerseyClientBuilder(new MetricRegistry())
+            .using(executor, JSON_MAPPER)
+            .build("test-jersey-client");
+        String uri = "http://127.0.0.1:" + httpServer.getAddress().getPort() + "/test";
+        CountDownLatch countDownLatch = new CountDownLatch(25); // Big enough that a `dispose` call shutdowns the executor
+        for (int i = 0; i < 25; i++) {
+            jersey.target(uri)
+                .register(HttpAuthenticationFeature.basic("scott", "t1ger")).request()
+                .async()
+                .get(new InvocationCallback<String>() {
+                    @Override
+                    public void completed(String s) {
+                        assertThat(s).isEqualTo("Hello World!");
+                        countDownLatch.countDown();
+                    }
+
+                    @Override
+                    public void failed(Throwable t) {
+                        t.printStackTrace();
+                    }
+                });
+        }
+        countDownLatch.await(5, TimeUnit.SECONDS);
+        assertThat(countDownLatch.getCount()).isEqualTo(0);
 
         executor.shutdown();
         jersey.close();

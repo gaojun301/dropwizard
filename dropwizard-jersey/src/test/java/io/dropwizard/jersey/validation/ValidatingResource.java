@@ -46,7 +46,7 @@ public class ValidatingResource {
 
     @QueryParam("sort")
     @Pattern(regexp = "^(asc|desc)$")
-    private String sortParam;
+    private String sortParam = "";
 
     @POST
     @Path("foo")
@@ -83,6 +83,18 @@ public class ValidatingResource {
     }
 
     @GET
+    @Path("messageValidation")
+    public String messageValidation(
+        @UnwrapValidatedValue
+        @NotNull
+        @Min(value = 2, message = "The value ${validatedValue} is less then {value}")
+        @QueryParam("length")
+            LongParam length
+    ) {
+        return Long.toString(length.get());
+    }
+
+    @GET
     @Path("barter")
     public String isnt(@QueryParam("name") @Length(min = 3) @UnwrapValidatedValue NonEmptyStringParam name) {
         return name.get().orElse(null);
@@ -91,7 +103,11 @@ public class ValidatingResource {
     @POST
     @Path("validatedPartialExampleBoth")
     public PartialExample validatedPartialExampleBoth(
-            @Validated({Partial1.class, Partial2.class}) @Valid PartialExample obj) {
+            @NotNull
+            @Valid
+            @Validated({Partial1.class, Partial2.class})
+            PartialExample obj
+    ) {
         return obj;
     }
 
@@ -134,7 +150,11 @@ public class ValidatingResource {
     @POST
     @Path("validatedPartialExample")
     public PartialExample validatedPartialExample(
-            @Validated({Partial1.class}) @Valid PartialExample obj) {
+            @NotNull(groups = Partial1.class)
+            @Valid
+            @Validated({Partial1.class})
+            PartialExample obj
+    ) {
         return obj;
     }
 
@@ -259,6 +279,18 @@ public class ValidatingResource {
     @Path("enumParam")
     public String enumParam(@NotNull @QueryParam("choice") Choice choice) {
         return choice.toString();
+    }
+
+    @GET
+    @Path("selfValidatingBeanParam")
+    public SelfValidatingClass selfValidating(@Valid @BeanParam SelfValidatingClass beanParameter) {
+        return beanParameter;
+    }
+
+    @POST
+    @Path("selfValidatingPayload")
+    public SelfValidatingClass selfValidatingPayload(@Valid SelfValidatingClass payload) {
+        return payload;
     }
 
 }

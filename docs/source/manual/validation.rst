@@ -76,9 +76,9 @@ detailing the validation errors: ``name may not be empty``
     class must be marked ``@Valid``. For more information, see the Hibernate Validator documentation
     on `Object graphs`_ and `Cascaded validation`_.
 
-.. _Object graphs: http://docs.jboss.org/hibernate/validator/5.2/reference/en-US/html/chapter-bean-constraints.html#section-object-graph-validation
+.. _Object graphs: https://docs.jboss.org/hibernate/validator/5.4/reference/en-US/html_single/#section-object-graph-validation
 
-.. _Cascaded validation: http://docs.jboss.org/hibernate/validator/5.2/reference/en-US/html/chapter-method-constraints.html#_cascaded_validation
+.. _Cascaded validation: https://docs.jboss.org/hibernate/validator/5.4/reference/en-US/html_single/#example-cascaded-validation
 
 Since our entity is also annotated with ``@NotNull``, Dropwizard will also guard against ``null``
 input with a response stating that the body must not be null.
@@ -207,6 +207,43 @@ knows the server failed through no fault of their own.
 Analogous to an empty request body, an empty entity annotated with ``@NotNull`` will return ``server
 response may not be null``
 
+.. warning::
+
+   Be careful when using return value constraints when endpoints satisfy all of the following:
+
+   - Function name starts with ``get``
+   - No arguments
+   - The return value has validation constraints
+
+   If an endpoint satisfies these conditions, whenever a request is processed by the resource that
+   endpoint will be additionally invoked. To give a concrete example:
+
+    .. code-block:: java
+
+        @Path("/")
+        public class ValidatedResource {
+            private AtomicLong counter = new AtomicLong();
+
+            @GET
+            @Path("/foo")
+            @NotEmpty
+            public String getFoo() {
+                counter.getAndIncrement();
+                return "";
+            }
+
+            @GET
+            @Path("/bar")
+            public String getBar() {
+                return "";
+            }
+        }
+
+
+    If a ``/foo`` is requested then ``counter`` will have increment by 2, and if ``/bar`` is
+    requested then ``counter`` will increment by 1. It is our hope that such endpoints are few, far
+    between, and documented thoroughly.
+
 .. _man-validation-limitations:
 
 Limitations
@@ -275,7 +312,7 @@ Annotations
 In addition to the `annotations defined in Hibernate Validator`_, Dropwizard contains another set of annotations,
 which are briefly shown below.
 
-.. _annotations defined in Hibernate Validator: http://docs.jboss.org/hibernate/validator/5.2/reference/en-US/html/chapter-bean-constraints.html#section-builtin-constraints
+.. _annotations defined in Hibernate Validator: https://docs.jboss.org/hibernate/validator/5.4/reference/en-US/html_single/#section-builtin-constraints
 
 .. code-block:: java
 
@@ -329,20 +366,23 @@ Validating Grouped Constraints with ``@Validated``
 
 The ``@Validated`` annotation allows for `validation groups`_ to be specifically set, instead of the
 default group. This is useful when different endpoints share the same entity but may have different
-requirements.
+validation requirements.
 
-.. _validation groups: https://docs.jboss.org/hibernate/validator/5.2/reference/en-US/html/chapter-groups.html
+.. _validation groups: https://docs.jboss.org/hibernate/validator/5.4/reference/en-US/html_single/#chapter-groups
 
-Going back to our favorite ``Person`` class. Let's say we initially coded it such that ``name`` has
-to be non-empty, but realized that business requirements needs the max length to be no more than 5.
-Instead of blowing away our current version of our API and creating angry clients, we can accept
-both versions of the API but at different endpoints.
+Going back to our favorite ``Person`` class. Let's say in the initial version of our API, ``name``
+has to be non-empty, but realized that business requirements changed and a name can't be longer than
+5 letters.  Instead of switching out the API from unsuspecting clients, we can accept both versions
+of the API but at different endpoints.
 
 .. code-block:: java
 
+    // We're going to create a group of validations for each version of our API
     public interface Version1Checks { }
 
-    public interface Version2Checks { }
+    // Our second version will extend Hibernate Validator Default class so that any validation
+    // annotation without an explicit group will also be validated with this version
+    public interface Version2Checks extends Default { }
 
     public class Person {
         @NotEmpty(groups = Version1Checks.class)
@@ -363,26 +403,44 @@ both versions of the API but at different endpoints.
     @Path("/person")
     @Produces(MediaType.APPLICATION_JSON)
     public class PersonResource {
+
+        // For the v1 endpoint, we'll validate with the version1 class, so we'll need to change the
+        // group of the NotNull annotation from the default of Default.class to Version1Checks.class
         @POST
         @Path("/v1")
-        public void createPersonV1(@Valid @Validated(Version1Checks.class) Person person) {
+        public void createPersonV1(
+            @NotNull(groups = Version1Checks.class)
+            @Valid
+            @Validated(Version1Checks.class)
+            Person person
+        ) {
+            // implementation ...
         }
 
+        // For the v2 endpoint, we'll validate with version1 and version2, which implicitly
+        // adds in the Default.class.
         @POST
         @Path("/v2")
-        public void createPersonV2(@Valid @Validated({Version1Checks.class, Version2Checks.class}) Person person) {
+        public void createPersonV2(
+            @NotNull
+            @Valid
+            @Validated({Version1Checks.class, Version2Checks.class})
+            Person person
+        ) {
+            // implementation ...
         }
     }
 
-Now, when clients hit ``/person/v1`` the ``Person`` entity will be checked by all the constraints
-that are a part of the ``Version1Checks`` group. If ``/person/v2`` is hit, then all the validations
+Now when clients hit ``/person/v1`` the ``Person`` entity will be checked by all the constraints
+that are a part of the ``Version1Checks`` group. If ``/person/v2`` is hit, then all validations
 are performed.
 
-.. note::
+.. warning::
 
-    Since interfaces can inherit other interfaces, ``Version2Checks`` can extend ``Version1Checks``
-    and wherever ``@Validated(Version2Checks.class)`` is used, version 1 constraints are checked
-    too.
+   If the `Version1Checks` group wasn't set for the `@NotNull` annotation for the v1 endpoint, the
+   annotation would not have had any effect and a null pointer exception would have occurred when a
+   property of a person is accessed. Dropwizard tries to protect against this class of bug by
+   disallowing multiple `@Validated` annotations on an endpoint that contain different groups.
 
 .. _man-validation-testing:
 

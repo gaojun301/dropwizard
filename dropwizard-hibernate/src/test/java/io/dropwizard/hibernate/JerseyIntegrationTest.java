@@ -2,6 +2,7 @@ package io.dropwizard.hibernate;
 
 import com.codahale.metrics.MetricRegistry;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 import io.dropwizard.db.DataSourceFactory;
 import io.dropwizard.jackson.Jackson;
 import io.dropwizard.jersey.DropwizardResourceConfig;
@@ -22,6 +23,7 @@ import org.joda.time.DateTimeZone;
 import org.junit.After;
 import org.junit.Test;
 
+import javax.annotation.Nullable;
 import javax.ws.rs.GET;
 import javax.ws.rs.PUT;
 import javax.ws.rs.Path;
@@ -82,6 +84,7 @@ public class JerseyIntegrationTest extends JerseyTest {
         }
     }
 
+    @Nullable
     private SessionFactory sessionFactory;
 
     @Override
@@ -101,6 +104,8 @@ public class JerseyIntegrationTest extends JerseyTest {
         final MetricRegistry metricRegistry = new MetricRegistry();
         final SessionFactoryFactory factory = new SessionFactoryFactory();
         final DataSourceFactory dbConfig = new DataSourceFactory();
+        dbConfig.setProperties(ImmutableMap.of("hibernate.jdbc.time_zone", "UTC"));
+
         final HibernateBundle<?> bundle = mock(HibernateBundle.class);
         final Environment environment = mock(Environment.class);
         final LifecycleEnvironment lifecycleEnvironment = mock(LifecycleEnvironment.class);

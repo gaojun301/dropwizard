@@ -22,6 +22,7 @@ import org.glassfish.jersey.server.monitoring.RequestEventListener;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
 import javax.ws.rs.Path;
 import javax.ws.rs.ext.Provider;
 import java.io.Serializable;
@@ -36,10 +37,11 @@ public class DropwizardResourceConfig extends ResourceConfig {
     private static final Logger LOGGER = LoggerFactory.getLogger(DropwizardResourceConfig.class);
     private static final String NEWLINE = String.format("%n");
     private static final TypeResolver TYPE_RESOLVER = new TypeResolver();
-    
+
     private static final Pattern PATH_DIRTY_SLASHES = Pattern.compile("\\s*/\\s*/+\\s*");
 
     private String urlPattern = "/*";
+    private String contextPath = "/";
 
     public DropwizardResourceConfig(MetricRegistry metricRegistry) {
         this(false, metricRegistry);
@@ -49,7 +51,7 @@ public class DropwizardResourceConfig extends ResourceConfig {
         this(true, null);
     }
 
-    public DropwizardResourceConfig(boolean testOnly, MetricRegistry metricRegistry) {
+    public DropwizardResourceConfig(boolean testOnly, @Nullable MetricRegistry metricRegistry) {
         super();
 
         if (metricRegistry == null) {
@@ -94,6 +96,10 @@ public class DropwizardResourceConfig extends ResourceConfig {
         this.urlPattern = urlPattern;
     }
 
+    public void setContextPath(String contextPath){
+        this.contextPath = contextPath;
+    }
+
     /**
      * Combines types of getClasses() and getSingletons in one Set.
      *
@@ -133,9 +139,9 @@ public class DropwizardResourceConfig extends ResourceConfig {
         }
 
         for (Class<?> klass : allResourcesClasses) {
-            new EndpointLogger(urlPattern, klass).populate(endpointLogLines);
+            new EndpointLogger(contextPath, urlPattern, klass).populate(endpointLogLines);
         }
-        
+
         final Set<Resource> allResources = this.getResources();
         for (Resource res : allResources) {
             for (Resource childRes : res.getChildResources()) {
@@ -143,9 +149,9 @@ public class DropwizardResourceConfig extends ResourceConfig {
                 //
                 // This code will never be reached because of ambiguous (sub-)resource methods
                 // related to the OPTIONS method and @Consumes/@Produces annotations.
-                
+
                 for (Class<?> childResHandlerClass : childRes.getHandlerClasses()) {
-                    EndpointLogger epl = new EndpointLogger(urlPattern, childResHandlerClass);
+                    EndpointLogger epl = new EndpointLogger(contextPath, urlPattern, childResHandlerClass);
                     epl.populate(cleanUpPath(res.getPath() + epl.rootPath), epl.klass, false, childRes, endpointLogLines);
                 }
             }
@@ -161,7 +167,7 @@ public class DropwizardResourceConfig extends ResourceConfig {
 
         return msg.toString();
     }
-    
+
     @VisibleForTesting
     String cleanUpPath(String path) {
         return PATH_DIRTY_SLASHES.matcher(path).replaceAll("/").trim();
@@ -176,8 +182,11 @@ public class DropwizardResourceConfig extends ResourceConfig {
         private final String rootPath;
         private final Class<?> klass;
 
-        EndpointLogger(String urlPattern, Class<?> klass) {
-            this.rootPath = urlPattern.endsWith("/*") ? urlPattern.substring(0, urlPattern.length() - 1) : urlPattern;
+        EndpointLogger(String contextPath, String urlPattern, Class<?> klass) {
+            final String rootPattern = urlPattern.endsWith("/*") ? urlPattern.substring(0, urlPattern.length() - 1) : urlPattern;
+            final String normalizedContextPath = contextPath.isEmpty() || contextPath.equals("/") ? "" :
+                contextPath.startsWith("/") ? contextPath : "/" + contextPath;
+            this.rootPath = normalizedContextPath + rootPattern;
             this.klass = klass;
         }
 
@@ -278,6 +287,7 @@ public class DropwizardResourceConfig extends ResourceConfig {
         }
 
         @Override
+        @Nullable
         public RequestEventListener onRequest(RequestEvent requestEvent) {
             return null;
         }

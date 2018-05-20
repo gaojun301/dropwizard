@@ -12,7 +12,10 @@ import io.dropwizard.jersey.validation.Validators;
 import io.dropwizard.lifecycle.setup.ExecutorServiceBuilder;
 import io.dropwizard.lifecycle.setup.LifecycleEnvironment;
 import io.dropwizard.setup.Environment;
+import org.apache.http.HttpEntity;
 import org.apache.http.client.CredentialsProvider;
+import org.apache.http.client.entity.GzipCompressingEntity;
+import org.apache.http.client.ServiceUnavailableRetryStrategy;
 import org.apache.http.config.Registry;
 import org.apache.http.config.RegistryBuilder;
 import org.apache.http.conn.DnsResolver;
@@ -21,10 +24,12 @@ import org.apache.http.conn.socket.ConnectionSocketFactory;
 import org.apache.http.conn.socket.PlainConnectionSocketFactory;
 import org.apache.http.conn.ssl.NoopHostnameVerifier;
 import org.apache.http.conn.ssl.SSLConnectionSocketFactory;
+import org.apache.http.entity.ByteArrayEntity;
 import org.apache.http.impl.client.DefaultHttpRequestRetryHandler;
 import org.apache.http.impl.client.SystemDefaultCredentialsProvider;
 import org.apache.http.impl.conn.SystemDefaultDnsResolver;
 import org.apache.http.impl.conn.SystemDefaultRoutePlanner;
+import org.glassfish.jersey.client.ClientRequest;
 import org.glassfish.jersey.client.rx.RxClient;
 import org.glassfish.jersey.client.rx.java8.RxCompletionStageInvoker;
 import org.junit.After;
@@ -32,6 +37,7 @@ import org.junit.Before;
 import org.junit.Test;
 import org.mockito.ArgumentCaptor;
 
+import javax.annotation.Nullable;
 import javax.net.ssl.HostnameVerifier;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManager;
@@ -273,6 +279,13 @@ public class JerseyClientBuilderTest {
     }
 
     @Test
+    public void usesACustomServiceUnavailableRetryStrategy() {
+        final ServiceUnavailableRetryStrategy customServiceUnavailableRetryStrategy = mock(ServiceUnavailableRetryStrategy.class);
+        builder.using(customServiceUnavailableRetryStrategy);
+        verify(apacheHttpClientBuilder).using(customServiceUnavailableRetryStrategy);
+    }
+
+    @Test
     public void usesACustomConnectionFactoryRegistry() throws Exception {
         final SSLContext ctx = SSLContext.getInstance(SSLConnectionSocketFactory.TLS);
         ctx.init(null, new TrustManager[]{
@@ -287,6 +300,7 @@ public class JerseyClientBuilderTest {
                 }
 
                 @Override
+                @Nullable
                 public X509Certificate[] getAcceptedIssuers() {
                     return null;
                 }
@@ -331,6 +345,22 @@ public class JerseyClientBuilderTest {
         verify(apacheHttpClientBuilder).using(customCredentialsProvider);
     }
 
+    @Test
+    public void apacheConnectorCanOverridden() {
+        assertThat(new JerseyClientBuilder(new MetricRegistry()) {
+            @Override
+            protected DropwizardApacheConnector createDropwizardApacheConnector(ConfiguredCloseableHttpClient configuredClient) {
+                return new DropwizardApacheConnector(configuredClient.getClient(), configuredClient.getDefaultRequestConfig(),
+                    true) {
+                    @Override
+                    protected HttpEntity getHttpEntity(ClientRequest jerseyRequest) {
+                        return new GzipCompressingEntity(new ByteArrayEntity((byte[]) jerseyRequest.getEntity()));
+                    }
+                };
+            }
+        }.using(environment).build("test")).isNotNull();
+    }
+
     @Provider
     @Consumes(MediaType.APPLICATION_SVG_XML)
     public static class FakeMessageBodyReader implements MessageBodyReader<JerseyClientBuilderTest> {
@@ -340,7 +370,11 @@ public class JerseyClientBuilderTest {
         }
 
         @Override
-        public JerseyClientBuilderTest readFrom(Class<JerseyClientBuilderTest> type, Type genericType, Annotation[] annotations, MediaType mediaType, MultivaluedMap<String, String> httpHeaders, InputStream entityStream) throws IOException, WebApplicationException {
+        @Nullable
+        public JerseyClientBuilderTest readFrom(Class<JerseyClientBuilderTest> type, Type genericType,
+                                                Annotation[] annotations, MediaType mediaType,
+                                                MultivaluedMap<String, String> httpHeaders, InputStream entityStream)
+            throws IOException, WebApplicationException {
             return null;
         }
     }

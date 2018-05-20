@@ -3,8 +3,8 @@ Dropwizard
 [![Build Status](https://travis-ci.org/dropwizard/dropwizard.svg?branch=master)](https://travis-ci.org/dropwizard/dropwizard)
 [![Coverage Status](https://coveralls.io/repos/github/dropwizard/dropwizard/badge.svg?branch=master)](https://coveralls.io/github/dropwizard/dropwizard?branch=master)
 [![Maven Central](https://maven-badges.herokuapp.com/maven-central/io.dropwizard/dropwizard-core/badge.svg)](https://maven-badges.herokuapp.com/maven-central/io.dropwizard/dropwizard-core/)
-[![Javadoc](https://javadoc-emblem.rhcloud.com/doc/io.dropwizard/dropwizard-core/badge.svg)](http://www.javadoc.io/doc/io.dropwizard/dropwizard-core)
-[![Code Climate](https://codeclimate.com/github/dropwizard/dropwizard/badges/gpa.svg)](https://codeclimate.com/github/dropwizard/dropwizard)
+[![Javadoc](http://javadoc-badge.appspot.com/io.dropwizard/dropwizard-core.svg)](http://www.javadoc.io/doc/io.dropwizard/dropwizard-core)
+[![Maintainability](https://api.codeclimate.com/v1/badges/11a16ea08c8b5499e2b9/maintainability)](https://codeclimate.com/github/dropwizard/dropwizard/maintainability)
 
 *Dropwizard is a sneaky way of making fast Java web applications.*
 
@@ -12,7 +12,7 @@ It's a little bit of opinionated glue code which bangs together a set of librari
 historically not sucked:
 
 * [Jetty](http://www.eclipse.org/jetty/) for HTTP servin'.
-* [Jersey](http://jersey.java.net/) for REST modelin'.
+* [Jersey](https://jersey.github.io/) for REST modelin'.
 * [Jackson](https://github.com/FasterXML/jackson) for JSON parsin' and generatin'.
 * [Logback](http://logback.qos.ch/) for loggin'.
 * [Hibernate Validator](http://hibernate.org/validator/) for validatin'.

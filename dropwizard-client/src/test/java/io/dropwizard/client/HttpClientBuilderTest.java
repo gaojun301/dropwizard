@@ -1,25 +1,17 @@
 package io.dropwizard.client;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.spy;
-import static org.mockito.Mockito.validateMockitoUsage;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
-import static org.mockito.MockitoAnnotations.initMocks;
-
-import java.io.IOException;
-import java.lang.reflect.Field;
-import java.net.InetSocketAddress;
-import java.net.Proxy;
-import java.net.ProxySelector;
-import java.net.SocketAddress;
-import java.net.URI;
-import java.util.List;
-import java.util.Optional;
-
-import javax.net.ssl.HostnameVerifier;
-
+import com.codahale.metrics.MetricRegistry;
+import com.codahale.metrics.httpclient.HttpClientMetricNameStrategies;
+import com.codahale.metrics.httpclient.InstrumentedHttpClientConnectionManager;
+import com.codahale.metrics.httpclient.InstrumentedHttpRequestExecutor;
+import com.google.common.collect.ImmutableList;
+import io.dropwizard.client.proxy.AuthConfiguration;
+import io.dropwizard.client.proxy.ProxyConfiguration;
+import io.dropwizard.client.ssl.TlsConfiguration;
+import io.dropwizard.lifecycle.Managed;
+import io.dropwizard.lifecycle.setup.LifecycleEnvironment;
+import io.dropwizard.setup.Environment;
+import io.dropwizard.util.Duration;
 import org.apache.commons.lang3.reflect.FieldUtils;
 import org.apache.http.Header;
 import org.apache.http.HeaderIterator;
@@ -30,10 +22,12 @@ import org.apache.http.HttpResponse;
 import org.apache.http.ProtocolException;
 import org.apache.http.auth.AuthScope;
 import org.apache.http.auth.Credentials;
+import org.apache.http.auth.NTCredentials;
 import org.apache.http.auth.UsernamePasswordCredentials;
 import org.apache.http.client.CredentialsProvider;
 import org.apache.http.client.HttpRequestRetryHandler;
 import org.apache.http.client.RedirectStrategy;
+import org.apache.http.client.ServiceUnavailableRetryStrategy;
 import org.apache.http.client.config.CookieSpecs;
 import org.apache.http.client.config.RequestConfig;
 import org.apache.http.client.methods.HttpGet;
@@ -66,19 +60,25 @@ import org.junit.Before;
 import org.junit.Test;
 import org.mockito.ArgumentCaptor;
 
-import com.codahale.metrics.MetricRegistry;
-import com.codahale.metrics.httpclient.HttpClientMetricNameStrategies;
-import com.codahale.metrics.httpclient.InstrumentedHttpClientConnectionManager;
-import com.codahale.metrics.httpclient.InstrumentedHttpRequestExecutor;
-import com.google.common.collect.ImmutableList;
+import javax.annotation.Nullable;
+import javax.net.ssl.HostnameVerifier;
+import java.io.IOException;
+import java.lang.reflect.Field;
+import java.net.InetSocketAddress;
+import java.net.Proxy;
+import java.net.ProxySelector;
+import java.net.SocketAddress;
+import java.net.URI;
+import java.util.List;
+import java.util.Optional;
 
-import io.dropwizard.client.proxy.AuthConfiguration;
-import io.dropwizard.client.proxy.ProxyConfiguration;
-import io.dropwizard.client.ssl.TlsConfiguration;
-import io.dropwizard.lifecycle.Managed;
-import io.dropwizard.lifecycle.setup.LifecycleEnvironment;
-import io.dropwizard.setup.Environment;
-import io.dropwizard.util.Duration;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.validateMockitoUsage;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+import static org.mockito.MockitoAnnotations.initMocks;
 
 
 public class HttpClientBuilderTest {
@@ -434,6 +434,7 @@ public class HttpClientBuilderTest {
             }
 
             @Override
+            @Nullable
             public Credentials getCredentials(AuthScope authscope) {
                 return null;
             }
@@ -468,7 +469,7 @@ public class HttpClientBuilderTest {
     }
 
     @Test
-    public void usesProxyWithAuth() throws Exception {
+    public void usesProxyWithBasicAuth() throws Exception {
         HttpClientConfiguration config = new HttpClientConfiguration();
         AuthConfiguration auth = new AuthConfiguration("secret", "stuff");
         ProxyConfiguration proxy = new ProxyConfiguration("192.168.52.11", 8080, "http", auth);
@@ -482,6 +483,26 @@ public class HttpClientBuilderTest {
 
         assertThat(credentialsProvider.getCredentials(new AuthScope("192.168.52.11", 8080)))
                 .isEqualTo(new UsernamePasswordCredentials("secret", "stuff"));
+    }
+
+    @Test
+    public void usesProxyWithNtlmAuth() throws Exception {
+        HttpClientConfiguration config = new HttpClientConfiguration();
+        AuthConfiguration auth = new AuthConfiguration("secret", "stuff", "NTLM", "realm", "host", "domain", "NT");
+        ProxyConfiguration proxy = new ProxyConfiguration("192.168.52.11", 8080, "http", auth);
+        config.setProxyConfiguration(proxy);
+
+        CloseableHttpClient httpClient = checkProxy(config, new HttpHost("dropwizard.io", 80),
+                new HttpHost("192.168.52.11", 8080, "http"));
+        CredentialsProvider credentialsProvider = (CredentialsProvider)
+                FieldUtils.getField(httpClient.getClass(), "credentialsProvider", true)
+                        .get(httpClient);
+
+        AuthScope authScope = new AuthScope("192.168.52.11", 8080, "realm", "NTLM");
+        Credentials credentials = new NTCredentials("secret", "stuff", "host", "domain");
+
+        assertThat(credentialsProvider.getCredentials(authScope))
+                .isEqualTo(credentials);
     }
 
     @Test
@@ -509,8 +530,8 @@ public class HttpClientBuilderTest {
         checkProxy(new HttpClientConfiguration(), new HttpHost("dropwizard.io", 80), null);
     }
 
-    private CloseableHttpClient checkProxy(HttpClientConfiguration config, HttpHost target, HttpHost expectedProxy)
-            throws Exception {
+    private CloseableHttpClient checkProxy(HttpClientConfiguration config, HttpHost target,
+                                           @Nullable HttpHost expectedProxy) throws Exception {
         CloseableHttpClient httpClient = builder.using(config).build("test");
         HttpRoutePlanner routePlanner = (HttpRoutePlanner)
                 FieldUtils.getField(httpClient.getClass(), "routePlanner", true).get(httpClient);
@@ -614,6 +635,7 @@ public class HttpClientBuilderTest {
             }
 
             @Override
+            @Nullable
             public HttpUriRequest getRedirect(HttpRequest httpRequest,
                                               HttpResponse httpResponse,
                                               HttpContext httpContext) throws ProtocolException {
@@ -658,11 +680,44 @@ public class HttpClientBuilderTest {
     }
 
     @Test
+    public void usesServiceUnavailableRetryStrategy() throws Exception {
+        ServiceUnavailableRetryStrategy serviceUnavailableRetryStrategy = mock(ServiceUnavailableRetryStrategy.class);
+        final ConfiguredCloseableHttpClient client =
+            builder.using(serviceUnavailableRetryStrategy)
+                .createClient(apacheBuilder, connectionManager, "test");
+        assertThat(client).isNotNull();
+        assertThat(FieldUtils.getField(httpClientBuilderClass,
+            "serviceUnavailStrategy", true)
+            .get(apacheBuilder))
+            .isSameAs(serviceUnavailableRetryStrategy);
+    }
+
+    @Test
     public void allowsCustomBuilderConfiguration() throws Exception {
         CustomBuilder builder = new CustomBuilder(new MetricRegistry());
         assertThat(builder.customized).isFalse();
         ConfiguredCloseableHttpClient client = builder.createClient(apacheBuilder, connectionManager, "test");
         assertThat(builder.customized).isTrue();
+    }
+
+    @Test
+    public void configureCredentialReturnsNTCredentialsForNTLMConfig() throws Exception {
+        AuthConfiguration ntlmConfig = new AuthConfiguration("username", "password", "NTLM", "realm", "hostname", "domain", "NT");
+
+        Credentials credentials = builder.configureCredentials(ntlmConfig);
+        assertThat(credentials).isInstanceOf(NTCredentials.class);
+        assertThat(credentials.getPassword()).isEqualTo("password");
+        assertThat(credentials.getUserPrincipal().getName()).isEqualTo("DOMAIN\\username");
+    }
+
+    @Test
+    public void configureCredentialReturnsNTCredentialsForBasicConfig() throws Exception {
+        AuthConfiguration ntlmConfig = new AuthConfiguration("username", "password");
+
+        Credentials credentials = builder.configureCredentials(ntlmConfig);
+        assertThat(credentials).isInstanceOf(UsernamePasswordCredentials.class);
+        assertThat(credentials.getPassword()).isEqualTo("password");
+        assertThat(credentials.getUserPrincipal().getName()).isEqualTo("username");
     }
 
     private Object spyHttpClientBuilderField(final String fieldName, final Object obj) throws Exception {

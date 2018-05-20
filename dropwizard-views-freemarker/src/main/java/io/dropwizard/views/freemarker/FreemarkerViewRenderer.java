@@ -4,6 +4,7 @@ import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
 import com.google.common.cache.LoadingCache;
 import com.google.common.collect.ImmutableMap;
+import freemarker.core.HTMLOutputFormat;
 import freemarker.template.Configuration;
 import freemarker.template.DefaultObjectWrapperBuilder;
 import freemarker.template.Template;
@@ -19,12 +20,13 @@ import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 /**
- * A {@link ViewRenderer} which renders Freemarker ({@code .ftl}) templates.
+ * A {@link ViewRenderer} which renders Freemarker ({@code .ftl, .ftlh or .ftlx}) templates.
  */
 public class FreemarkerViewRenderer implements ViewRenderer {
-
+    private static final Pattern FILE_PATTERN = Pattern.compile("\\.ftl[hx]?");
     private static final Version FREEMARKER_VERSION = Configuration.getVersion();
     private final TemplateLoader loader;
 
@@ -37,6 +39,8 @@ public class FreemarkerViewRenderer implements ViewRenderer {
             configuration.loadBuiltInEncodingMap();
             configuration.setDefaultEncoding(StandardCharsets.UTF_8.name());
             configuration.setClassForTemplateLoading(key, "/");
+            // setting the outputformat implicitly enables auto escaping
+            configuration.setOutputFormat(HTMLOutputFormat.INSTANCE);
             for (Map.Entry<String, String> entry : baseConfig.entrySet()) {
                 configuration.setSetting(entry.getKey(), entry.getValue());
             }
@@ -59,7 +63,7 @@ public class FreemarkerViewRenderer implements ViewRenderer {
 
     @Override
     public boolean isRenderable(View view) {
-        return view.getTemplateName().endsWith(getSuffix());
+        return FILE_PATTERN.matcher(view.getTemplateName()).find();
     }
 
     @Override
@@ -82,7 +86,7 @@ public class FreemarkerViewRenderer implements ViewRenderer {
     }
 
     @Override
-    public String getSuffix() {
-        return ".ftl";
+    public String getConfigurationKey() {
+        return "freemarker";
     }
 }

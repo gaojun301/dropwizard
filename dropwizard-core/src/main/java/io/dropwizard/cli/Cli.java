@@ -3,6 +3,7 @@ package io.dropwizard.cli;
 import io.dropwizard.setup.Bootstrap;
 import io.dropwizard.util.JarLocation;
 import net.sourceforge.argparse4j.ArgumentParsers;
+import net.sourceforge.argparse4j.helper.HelpScreenException;
 import net.sourceforge.argparse4j.impl.Arguments;
 import net.sourceforge.argparse4j.inf.Argument;
 import net.sourceforge.argparse4j.inf.ArgumentAction;
@@ -10,7 +11,6 @@ import net.sourceforge.argparse4j.inf.ArgumentParser;
 import net.sourceforge.argparse4j.inf.ArgumentParserException;
 import net.sourceforge.argparse4j.inf.Namespace;
 import net.sourceforge.argparse4j.inf.Subparser;
-import net.sourceforge.argparse4j.internal.HelpScreenException;
 
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
@@ -20,6 +20,8 @@ import java.util.Arrays;
 import java.util.Map;
 import java.util.SortedMap;
 import java.util.TreeMap;
+
+import static java.util.Objects.requireNonNull;
 
 /**
  * The command-line runner for Dropwizard application.
@@ -70,8 +72,16 @@ public class Cli {
                 parser.printVersion(stdOut);
             } else {
                 final Namespace namespace = parser.parseArgs(arguments);
-                final Command command = commands.get(namespace.getString(COMMAND_NAME_ATTR));
-                command.run(bootstrap, namespace);
+                final Command command = requireNonNull(commands.get(namespace.getString(COMMAND_NAME_ATTR)),
+                    "Command is not found");
+                try {
+                    command.run(bootstrap, namespace);
+                } catch (Throwable e) {
+                    // The command failed to run, and the command knows
+                    // best how to cleanup / debug exception
+                    command.onError(this, namespace, e);
+                    return false;
+                }
             }
             return true;
         } catch (HelpScreenException ignored) {
@@ -81,10 +91,6 @@ public class Cli {
         } catch (ArgumentParserException e) {
             stdErr.println(e.getMessage());
             e.getParser().printHelp(stdErr);
-            return false;
-        } catch (Throwable t) {
-            // Unexpected exceptions should result in non-zero exit status of the process
-            stdErr.println(t.getMessage());
             return false;
         }
     }
@@ -100,7 +106,7 @@ public class Cli {
 
     private ArgumentParser buildParser(JarLocation location) {
         final String usage = "java -jar " + location;
-        final ArgumentParser p = ArgumentParsers.newArgumentParser(usage, false);
+        final ArgumentParser p = ArgumentParsers.newFor(usage).addHelp(false).build();
         p.version(location.getVersion().orElse(
                 "No application version detected. Add a Implementation-Version " +
                         "entry to your JAR's manifest to enable this."));
@@ -127,6 +133,14 @@ public class Cli {
         subparser.description(command.getDescription())
                  .setDefault(COMMAND_NAME_ATTR, command.getName())
                  .defaultHelp(true);
+    }
+
+    public PrintWriter getStdOut() {
+        return stdOut;
+    }
+
+    public PrintWriter getStdErr() {
+        return stdErr;
     }
 
     private static class SafeHelpAction implements ArgumentAction {

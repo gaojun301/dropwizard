@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.DeserializationContext;
 import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.deser.std.StdDeserializer;
 
+import javax.annotation.Nullable;
 import java.io.IOException;
 
 /**
@@ -23,7 +24,12 @@ public class CustomDeserialization extends StdDeserializer<CustomRepresentation>
         JsonParser jsonParser,
         DeserializationContext deserializationContext
     ) throws IOException {
-        throw new MyNastyException(jsonParser);
+        final Object ss = jsonParser.readValueAs(Object.class);
+        if (ss.equals("SQL_INECTION")) {
+            throw new RuntimeException("Database fell over due to sql injection");
+        } else {
+            throw new MyNastyException(jsonParser);
+        }
     }
 
     /**
@@ -36,6 +42,7 @@ public class CustomDeserialization extends StdDeserializer<CustomRepresentation>
         }
 
         @Override
+        @Nullable
         public String getMessage() {
             return null;
         }

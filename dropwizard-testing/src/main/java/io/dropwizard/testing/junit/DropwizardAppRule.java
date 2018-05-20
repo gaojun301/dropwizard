@@ -5,11 +5,13 @@ import io.dropwizard.Application;
 import io.dropwizard.Configuration;
 import io.dropwizard.cli.Command;
 import io.dropwizard.cli.ServerCommand;
+import io.dropwizard.jersey.jackson.JacksonBinder;
 import io.dropwizard.lifecycle.Managed;
 import io.dropwizard.setup.Environment;
 import io.dropwizard.testing.ConfigOverride;
 import io.dropwizard.testing.DropwizardTestSupport;
 import org.glassfish.jersey.client.ClientProperties;
+import org.glassfish.jersey.client.HttpUrlConnectorProvider;
 import org.glassfish.jersey.client.JerseyClientBuilder;
 import org.junit.rules.ExternalResource;
 
@@ -19,7 +21,7 @@ import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 
-
+//@formatter:off
 /**
  * A JUnit rule for starting and stopping your application at the start and end of a test class.
  * <p>
@@ -67,6 +69,7 @@ import java.util.function.Function;
  *
  * @param <C> the configuration type
  */
+//@formatter:on
 public class DropwizardAppRule<C extends Configuration> extends ExternalResource {
 
     private static final int DEFAULT_CONNECT_TIMEOUT_MS = 1000;
@@ -75,6 +78,8 @@ public class DropwizardAppRule<C extends Configuration> extends ExternalResource
     private final DropwizardTestSupport<C> testSupport;
 
     private final AtomicInteger recursiveCallCount = new AtomicInteger(0);
+
+    @Nullable
     private Client client;
 
     public DropwizardAppRule(Class<? extends Application<C>> applicationClass) {
@@ -87,12 +92,12 @@ public class DropwizardAppRule<C extends Configuration> extends ExternalResource
         this(applicationClass, configPath, Optional.empty(), configOverrides);
     }
 
-    public DropwizardAppRule(Class<? extends Application<C>> applicationClass, String configPath,
+    public DropwizardAppRule(Class<? extends Application<C>> applicationClass, @Nullable String configPath,
                              Optional<String> customPropertyPrefix, ConfigOverride... configOverrides) {
         this(applicationClass, configPath, customPropertyPrefix, ServerCommand::new, configOverrides);
     }
 
-    public DropwizardAppRule(Class<? extends Application<C>> applicationClass, String configPath,
+    public DropwizardAppRule(Class<? extends Application<C>> applicationClass, @Nullable String configPath,
                              Optional<String> customPropertyPrefix, Function<Application<C>,
                              Command> commandInstantiator, ConfigOverride... configOverrides) {
         this(new DropwizardTestSupport<>(applicationClass, configPath, customPropertyPrefix, commandInstantiator,
@@ -187,6 +192,7 @@ public class DropwizardAppRule<C extends Configuration> extends ExternalResource
         return testSupport.newApplication();
     }
 
+    @SuppressWarnings("unchecked")
     public <A extends Application<C>> A getApplication() {
         return testSupport.getApplication();
     }
@@ -233,7 +239,9 @@ public class DropwizardAppRule<C extends Configuration> extends ExternalResource
 
     protected JerseyClientBuilder clientBuilder() {
         return new JerseyClientBuilder()
+            .register(new JacksonBinder(getObjectMapper()))
             .property(ClientProperties.CONNECT_TIMEOUT, DEFAULT_CONNECT_TIMEOUT_MS)
-            .property(ClientProperties.READ_TIMEOUT, DEFAULT_READ_TIMEOUT_MS);
+            .property(ClientProperties.READ_TIMEOUT, DEFAULT_READ_TIMEOUT_MS)
+            .property(HttpUrlConnectorProvider.SET_METHOD_WORKAROUND, true);
     }
 }

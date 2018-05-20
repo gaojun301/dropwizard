@@ -11,9 +11,9 @@ import io.dropwizard.jersey.validation.HibernateValidationFeature;
 import io.dropwizard.jersey.validation.Validators;
 import io.dropwizard.lifecycle.Managed;
 import io.dropwizard.setup.Environment;
-import io.dropwizard.util.Duration;
 import org.apache.http.client.CredentialsProvider;
 import org.apache.http.client.HttpRequestRetryHandler;
+import org.apache.http.client.ServiceUnavailableRetryStrategy;
 import org.apache.http.config.Registry;
 import org.apache.http.conn.DnsResolver;
 import org.apache.http.conn.routing.HttpRoutePlanner;
@@ -24,6 +24,7 @@ import org.glassfish.jersey.client.rx.RxClient;
 import org.glassfish.jersey.client.rx.RxInvoker;
 import org.glassfish.jersey.client.spi.ConnectorProvider;
 
+import javax.annotation.Nullable;
 import javax.net.ssl.HostnameVerifier;
 import javax.validation.Validator;
 import javax.ws.rs.client.Client;
@@ -64,11 +65,18 @@ public class JerseyClientBuilder {
 
     private HttpClientBuilder apacheHttpClientBuilder;
     private Validator validator = Validators.newValidator();
+
+    @Nullable
     private Environment environment;
+
+    @Nullable
     private ObjectMapper objectMapper;
+
+    @Nullable
     private ExecutorService executorService;
+
+    @Nullable
     private ConnectorProvider connectorProvider;
-    private Duration shutdownGracePeriod = Duration.seconds(5);
 
     public JerseyClientBuilder(Environment environment) {
         this.apacheHttpClientBuilder = new HttpClientBuilder(environment);
@@ -119,18 +127,6 @@ public class JerseyClientBuilder {
      */
     public JerseyClientBuilder withProperty(String propertyName, Object propertyValue) {
         properties.put(propertyName, propertyValue);
-        return this;
-    }
-
-    /**
-     * Sets the shutdown grace period.
-     *
-     * @param shutdownGracePeriod a period of time to await shutdown of the
-     *        configured {ExecutorService}.
-     * @return {@code this}
-     */
-    public JerseyClientBuilder withShutdownGracePeriod(Duration shutdownGracePeriod) {
-        this.shutdownGracePeriod = shutdownGracePeriod;
         return this;
     }
 
@@ -314,6 +310,17 @@ public class JerseyClientBuilder {
     }
 
     /**
+     * Use the given {@link ServiceUnavailableRetryStrategy} instance.
+     *
+     * @param serviceUnavailableRetryStrategy a {@link ServiceUnavailableRetryStrategy} instance
+     * @return {@code this}
+     */
+    public JerseyClientBuilder using(ServiceUnavailableRetryStrategy serviceUnavailableRetryStrategy) {
+        apacheHttpClientBuilder.using(serviceUnavailableRetryStrategy);
+        return this;
+    }
+
+    /**
      * Builds the {@link RxClient} instance.
      *
      * @return a fully-configured {@link RxClient}
@@ -338,18 +345,16 @@ public class JerseyClientBuilder {
             // configuration. The DisposableExecutorService decorator
             // is used to ensure that the service is shut down if the
             // Jersey client disposes of it.
-            executorService = new DropwizardExecutorProvider.DisposableExecutorService(
-                environment.lifecycle()
-                    .executorService("jersey-client-" + name + "-%d")
-                    .minThreads(configuration.getMinThreads())
-                    .maxThreads(configuration.getMaxThreads())
-                    .workQueue(new ArrayBlockingQueue<>(configuration.getWorkQueueSize()))
-                    .build()
-            );
+            executorService = requireNonNull(environment).lifecycle()
+                .executorService("jersey-client-" + name + "-%d")
+                .minThreads(configuration.getMinThreads())
+                .maxThreads(configuration.getMaxThreads())
+                .workQueue(new ArrayBlockingQueue<>(configuration.getWorkQueueSize()))
+                .build();
         }
 
         if (objectMapper == null) {
-            objectMapper = environment.getObjectMapper();
+            objectMapper = requireNonNull(environment).getObjectMapper();
         }
 
         if (environment != null) {
@@ -410,17 +415,23 @@ public class JerseyClientBuilder {
             config.property(property.getKey(), property.getValue());
         }
 
-        config.register(new DropwizardExecutorProvider(threadPool, shutdownGracePeriod));
+        config.register(new DropwizardExecutorProvider(threadPool));
         if (connectorProvider == null) {
             final ConfiguredCloseableHttpClient apacheHttpClient =
                     apacheHttpClientBuilder.buildWithDefaultRequestConfiguration(name);
-            connectorProvider = (client, runtimeConfig) -> new DropwizardApacheConnector(
-                    apacheHttpClient.getClient(),
-                    apacheHttpClient.getDefaultRequestConfig(),
-                    configuration.isChunkedEncodingEnabled());
+            connectorProvider = (client, runtimeConfig) -> createDropwizardApacheConnector(apacheHttpClient);
         }
         config.connectorProvider(connectorProvider);
 
         return config;
+    }
+
+    /**
+     * Builds {@link DropwizardApacheConnector} based on the configured Apache HTTP client
+     * as {@link ConfiguredCloseableHttpClient} and the chunked encoding configuration set by the user.
+     */
+    protected DropwizardApacheConnector createDropwizardApacheConnector(ConfiguredCloseableHttpClient configuredClient) {
+        return new DropwizardApacheConnector(configuredClient.getClient(), configuredClient.getDefaultRequestConfig(),
+                configuration.isChunkedEncodingEnabled());
     }
 }

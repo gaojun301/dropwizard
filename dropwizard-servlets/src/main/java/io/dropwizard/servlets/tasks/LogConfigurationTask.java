@@ -3,8 +3,10 @@ package io.dropwizard.servlets.tasks;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.LoggerContext;
 import com.google.common.collect.ImmutableMultimap;
+import org.slf4j.ILoggerFactory;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
 import java.io.PrintWriter;
 import java.util.List;
 
@@ -30,23 +32,23 @@ import java.util.List;
  */
 public class LogConfigurationTask extends Task {
 
-    private final LoggerContext loggerContext;
+    private final ILoggerFactory loggerContext;
 
     /**
      * Creates a new LogConfigurationTask.
      */
     public LogConfigurationTask() {
-        this((LoggerContext) LoggerFactory.getILoggerFactory());
+        this(LoggerFactory.getILoggerFactory());
     }
 
     /**
-     * Creates a new LogConfigurationTask with the given {@link ch.qos.logback.classic.LoggerContext} instance.
+     * Creates a new LogConfigurationTask with the given {@link ILoggerFactory} instance.
      * <p/>
      * <b>Use {@link LogConfigurationTask#LogConfigurationTask()} instead.</b>
      *
-     * @param loggerContext a {@link ch.qos.logback.classic.LoggerContext} instance
+     * @param loggerContext a {@link ILoggerFactory} instance
      */
-    public LogConfigurationTask(LoggerContext loggerContext) {
+    public LogConfigurationTask(ILoggerFactory loggerContext) {
         super("log-level");
         this.loggerContext = loggerContext;
     }
@@ -57,7 +59,7 @@ public class LogConfigurationTask extends Task {
         final Level loggerLevel = getLoggerLevel(parameters);
 
         for (String loggerName : loggerNames) {
-            loggerContext.getLogger(loggerName).setLevel(loggerLevel);
+            ((LoggerContext) loggerContext).getLogger(loggerName).setLevel(loggerLevel);
             output.println(String.format("Configured logging level for %s to %s", loggerName, loggerLevel));
             output.flush();
         }
@@ -67,6 +69,7 @@ public class LogConfigurationTask extends Task {
         return parameters.get("logger").asList();
     }
 
+    @Nullable
     private Level getLoggerLevel(ImmutableMultimap<String, String> parameters) {
         final List<String> loggerLevels = parameters.get("level").asList();
         return loggerLevels.isEmpty() ? null : Level.valueOf(loggerLevels.get(0));
